@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": 1,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout/Basic_concepts",
+      "title": "Basic concepts of CSS grid layout",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 2,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/table",
+      "title": "HTML table element",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 3,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/details",
+      "title": "HTML details disclosure element",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 4,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time",
+      "title": "HTML time element",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 5,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch",
+      "title": "Using the Fetch API",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 6,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/SVG/Guides/SVG_in_HTML",
+      "title": "SVG in HTML introduction",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 7,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-motion",
+      "title": "prefers-reduced-motion CSS media feature",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 8,
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/font-variant-numeric",
+      "title": "font-variant-numeric CSS property",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 9,
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/use-of-color",
+      "title": "WCAG 2.2: Use of Color",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 10,
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html",
+      "title": "WCAG 2.2: Focus Visible",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 11,
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html",
+      "title": "WCAG 2.2: Contrast Minimum",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 12,
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html",
+      "title": "WCAG 2.2: Status Messages",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 13,
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html",
+      "title": "WCAG 2.2: Non-text Contrast",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 14,
+      "url": "https://www.chartjs.org/docs/latest/general/accessibility.html",
+      "title": "Chart.js Accessibility",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 15,
+      "url": "https://www.chartjs.org/docs/latest/getting-started/integration",
+      "title": "Chart.js Integration",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 16,
+      "url": "https://www.chartjs.org/docs/latest/general/responsive.html",
+      "title": "Chart.js Responsive Charts",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 17,
+      "url": "https://preactjs.com",
+      "title": "Preact",
+      "accessed": "2026-09-20"
+    },
+    {
+      "id": 18,
+      "url": "https://preactjs.com/guide/v10/getting-started",
+      "title": "Preact Getting Started",
+      "accessed": "2026-09-20"
+    }
+  ]
+}
