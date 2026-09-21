@@ -3,12 +3,14 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from jev_demo.__main__ import RunApplication, handler_for
+from jev_demo.historical_data import AlpacaHistoricalData
 from jev_demo.run_store import RunStore
 
 
@@ -19,6 +21,7 @@ class HttpRunTests(unittest.TestCase):
         self.started = []
         self.workers = []
         self.release = threading.Event()
+        self.latest_date = lambda: "2026-09-18"
 
         def submit(run_id, request):
             self.started.append((run_id, request))
@@ -34,7 +37,8 @@ class HttpRunTests(unittest.TestCase):
             worker.start()
 
         self.server = ThreadingHTTPServer(
-            ("127.0.0.1", 0), handler_for(RunApplication(self.store, submit))
+            ("127.0.0.1", 0),
+            handler_for(RunApplication(self.store, submit), lambda: self.latest_date()),
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -99,6 +103,52 @@ class HttpRunTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as caught:
             self.request("/api/runs", "POST", {"trading_date": "not-a-date"})
         self.assertEqual(400, caught.exception.code)
+
+    def test_page_exposes_accessible_run_workflow_without_api_key_fields(self):
+        with urlopen(self.base_url + "/", timeout=2) as response:
+            page = response.read().decode()
+
+        self.assertIn("Historical paper trading", page)
+        self.assertIn('<label for="trading-date">Trading date</label>', page)
+        self.assertIn('type="date" id="trading-date"', page)
+        self.assertIn('value="2026-09-18"', page)
+        self.assertIn('id="run-status" role="status"', page)
+        self.assertIn('id="completed-runs"', page)
+        self.assertIn('"/api/runs"', page)
+        self.assertNotIn('type="password"', page)
+        self.assertNotIn("API key", page)
+
+    def test_page_defaults_to_latest_completed_exchange_session(self):
+        cases = (
+            (
+                datetime(2026, 9, 21, 21, tzinfo=timezone.utc),
+                [
+                    {"date": "2026-09-18", "open": "09:30", "close": "16:00"},
+                    {"date": "2026-09-21", "open": "09:30", "close": "16:00"},
+                ],
+                "2026-09-21",
+            ),
+            (
+                datetime(2026, 9, 7, 21, tzinfo=timezone.utc),
+                [{"date": "2026-09-04", "open": "09:30", "close": "16:00"}],
+                "2026-09-04",
+            ),
+        )
+        for now, calendar, expected in cases:
+            with self.subTest(now=now):
+                data = AlpacaHistoricalData(
+                    "key",
+                    "secret",
+                    self.directory.name,
+                    request=lambda request, calendar=calendar: json.dumps(calendar).encode(),
+                    now=lambda now=now: now,
+                )
+                self.latest_date = data.latest_completed_date
+
+                with urlopen(self.base_url + "/", timeout=2) as response:
+                    page = response.read().decode()
+
+                self.assertIn(f'value="{expected}"', page)
 
     def test_restart_preserves_completed_and_fails_interrupted_runs(self):
         completed = self.store.create({"trading_date": "2026-09-17", "method": "buy_and_hold"})

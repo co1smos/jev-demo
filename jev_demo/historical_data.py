@@ -65,6 +65,28 @@ class AlpacaHistoricalData:
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.source = Source(feed=feed)
 
+    def latest_completed_date(self):
+        now = self.now().astimezone(timezone.utc)
+        today = now.astimezone(ZoneInfo("America/New_York")).date()
+        calendar = self._json(
+            "https://api.alpaca.markets/v2/calendar?"
+            + urlencode({"start": today - timedelta(days=31), "end": today})
+        )
+        if not isinstance(calendar, list):
+            raise HistoricalDataError("malformed Alpaca calendar response")
+        try:
+            completed = [
+                session_date
+                for session in calendar
+                for session_date, _, session_close in (self._session_times(session),)
+                if session_close.astimezone(timezone.utc) <= now
+            ]
+        except (KeyError, TypeError, ValueError) as error:
+            raise HistoricalDataError("malformed Alpaca calendar response") from error
+        if not completed:
+            raise HistoricalDataError("no completed trading session is available")
+        return max(completed).isoformat()
+
     def snapshot(self, trading_date, symbols=SYMBOLS):
         try:
             requested_date = trading_date if type(trading_date) is date else date.fromisoformat(trading_date)
@@ -90,14 +112,9 @@ class AlpacaHistoricalData:
             raise HistoricalDataError("malformed Alpaca calendar response")
         if not calendar:
             raise HistoricalDataError(f"{trading_date} is not a trading day")
-        session = calendar[0]
         try:
-            if session["date"] != trading_date:
-                raise ValueError
-            eastern = ZoneInfo("America/New_York")
-            session_open = datetime.fromisoformat(f"{requested_date}T{session['open']}").replace(tzinfo=eastern)
-            session_close = datetime.fromisoformat(f"{requested_date}T{session['close']}").replace(tzinfo=eastern)
-            if session_open >= session_close:
+            session_date, session_open, session_close = self._session_times(calendar[0])
+            if session_date != requested_date:
                 raise ValueError
         except (KeyError, TypeError, ValueError) as error:
             raise HistoricalDataError("malformed Alpaca calendar response") from error
@@ -242,6 +259,16 @@ class AlpacaHistoricalData:
             raise HistoricalDataError("Alpaca data unavailable") from error
         except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as error:
             raise HistoricalDataError("malformed Alpaca response") from error
+
+    @staticmethod
+    def _session_times(session):
+        session_date = date.fromisoformat(session["date"])
+        eastern = ZoneInfo("America/New_York")
+        session_open = datetime.fromisoformat(f"{session_date}T{session['open']}").replace(tzinfo=eastern)
+        session_close = datetime.fromisoformat(f"{session_date}T{session['close']}").replace(tzinfo=eastern)
+        if session_open >= session_close:
+            raise ValueError
+        return session_date, session_open, session_close
 
     @staticmethod
     def _timestamp(value):
