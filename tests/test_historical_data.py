@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
@@ -8,6 +9,34 @@ from jev_demo.historical_data import AlpacaHistoricalData, HistoricalDataError
 
 
 class HistoricalDataTests(unittest.TestCase):
+    def test_rejects_self_consistent_incomplete_cached_snapshot(self):
+        calendar = [{"date": "2026-09-18", "open": "09:30", "close": "09:31"}]
+        bars = {
+            symbol: [{"t": "2026-09-18T13:30:00Z", "o": 100, "h": 101,
+                      "l": 99, "c": 100.5, "v": 1000}]
+            for symbol in ("AAPL", "MSFT", "NVDA")
+        }
+        responses = iter((calendar, {"bars": bars}))
+
+        with tempfile.TemporaryDirectory() as directory:
+            service = AlpacaHistoricalData(
+                "key", "secret", directory,
+                request=lambda _request: json.dumps(next(responses)).encode(),
+                now=lambda: datetime(2026, 9, 19, tzinfo=timezone.utc),
+            )
+            service.snapshot("2026-09-18")
+            cache_path = next(Path(directory).iterdir())
+            payload = json.loads(cache_path.read_text())
+            payload["bars"] = []
+            unsigned = {key: value for key, value in payload.items() if key != "digest"}
+            payload["digest"] = sha256(
+                json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            cache_path.write_text(json.dumps(payload))
+
+            with self.assertRaisesRegex(HistoricalDataError, "missing"):
+                service.snapshot("2026-09-18")
+
     def test_returns_validated_snapshot_then_reuses_it_without_another_request(self):
         calls = []
         timestamps = ["2026-09-18T13:30:00Z", "2026-09-18T13:31:00Z"]
