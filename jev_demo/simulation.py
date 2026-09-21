@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, ROUND_CEILING
 from itertools import groupby
 
+from .decision import obtain_minute_decisions
 from .strategy import AccountSnapshot, Action, Position, TrendMomentumV1, crossover_action
 
 STARTING_CASH = Decimal("100000")
@@ -29,7 +30,7 @@ def _fee(value):
     return value.quantize(CENT, rounding=ROUND_CEILING)
 
 
-def run_simulation(request, snapshot, store, run_id=None):
+def run_simulation(request, snapshot, store, run_id=None, decision_provider=None):
     """Run a supported method through the shared persisted simulation seam."""
     if not isinstance(request, SimulationRequest):
         raise ValueError("a SimulationRequest is required")
@@ -39,6 +40,10 @@ def run_simulation(request, snapshot, store, run_id=None):
         if run_id is not None:
             raise ValueError("an existing run is only supported for buy_and_hold")
         return run_sma_crossover(request, snapshot, store)
+    if request.method == "jev":
+        if decision_provider is None:
+            raise ValueError("a decision provider is required for JEV simulations")
+        return run_jev(request, snapshot, decision_provider, store, run_id)
     raise ValueError(f"unsupported simulation method: {request.method}")
 
 
@@ -87,12 +92,78 @@ def run_sma_crossover(request, snapshot, store):
     return _run(request, snapshot, store, decisions, recorded)
 
 
-def _run(request, snapshot, store, decide, decisions=None, run_id=None):
+def run_jev(request, snapshot, decision_provider, store, run_id=None):
+    """Run every eligible minute through JEV and the deterministic action policy."""
+    if not isinstance(request, SimulationRequest) or request.method != "jev":
+        raise ValueError("a JEV SimulationRequest is required")
+    if run_id is not None:
+        existing = store.read(run_id)
+        stored_request = existing["request"]
+        if (stored_request.get("trading_date") != request.trading_date
+                or stored_request.get("method") != request.method
+                or stored_request.get("source_digest", snapshot.digest) != snapshot.digest):
+            raise ValueError("run does not match the simulation request")
+        if existing["status"] == "completed":
+            return existing
+        if existing["status"] != "running" or any(
+            record["kind"] in ("action", "order") or record["kind"].startswith("jev_decision")
+            for record in existing["records"]
+        ):
+            raise ValueError("a partially processed JEV run cannot be replayed")
+    run_id = run_id or store.create({**asdict(request), "source_digest": snapshot.digest})
+    recorded = []
+    actions = []
+
+    def decisions(index, quantities):
+        minute = snapshot.bars[index * len(snapshot.symbols)].timestamp
+        account = AccountSnapshot(tuple(
+            Position(symbol, quantity) for symbol, quantity in quantities.items() if quantity
+        ))
+        minute_decisions = obtain_minute_decisions(
+            run_id, snapshot, account, minute, decision_provider, store
+        )
+        selected = {}
+        minute_actions = []
+        for symbol in snapshot.symbols:
+            decision = minute_decisions[symbol]
+            action = decision["action"]
+            available = not (
+                (action == "BUY" and quantities[symbol])
+                or (action == "SELL" and not quantities[symbol])
+            )
+            minute_actions.append({
+                "symbol": symbol,
+                "minute": minute,
+                "action": action,
+                "available": available,
+                "explanation": (
+                    "buy_unavailable_while_long" if action == "BUY" and not available
+                    else "sell_unavailable_while_flat" if action == "SELL" and not available
+                    else "open_to_10_percent_target" if action == "BUY"
+                    else "close_position" if action == "SELL"
+                    else "no_change"
+                ),
+            })
+            if available and action in ("BUY", "SELL"):
+                selected[symbol] = Action(action)
+        recorded.extend(minute_decisions.values())
+        actions.extend(minute_actions)
+        store.append(run_id, ({"kind": "action", "data": item} for item in minute_actions))
+        return selected
+
+    return _run(request, snapshot, store, decisions, recorded, run_id, actions)
+
+
+def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_records=None):
     if request.trading_date != snapshot.trading_date:
         raise ValueError("request and snapshot trading dates differ")
 
     minutes = []
+    seen_minutes = set()
     for timestamp, bars in groupby(snapshot.bars, key=lambda bar: bar.timestamp):
+        if timestamp in seen_minutes:
+            raise ValueError("snapshot contains a duplicate minute")
+        seen_minutes.add(timestamp)
         bars = tuple(bars)
         by_symbol = {bar.symbol: bar for bar in bars}
         if len(bars) != len(snapshot.symbols) or tuple(sorted(by_symbol)) != tuple(sorted(snapshot.symbols)):
@@ -210,8 +281,10 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None):
     }
     if decisions is not None:
         result["decisions"] = decisions
+    if action_records is not None:
+        result["actions"] = action_records
     store.append(run_id, [
-        *({"kind": "decision", "data": item} for item in decisions or ()),
+        *({"kind": "decision", "data": item} for item in decisions or () if request.method != "jev"),
         *({"kind": "order", "data": item} for item in orders),
         *({"kind": "fill", "data": item} for item in fills),
         *({"kind": "fee", "data": item} for item in fees),
