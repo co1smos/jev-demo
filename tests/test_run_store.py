@@ -1,4 +1,3 @@
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,7 +47,7 @@ class RunStoreTests(unittest.TestCase):
     def test_schema_initializes_and_failed_batch_rolls_back(self):
         run_id = self.store.create({"date": "2026-09-18"})
 
-        with self.assertRaises(sqlite3.IntegrityError):
+        with self.assertRaises(ValueError):
             self.store.append(
                 run_id,
                 [

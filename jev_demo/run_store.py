@@ -64,13 +64,13 @@ class RunStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._require_running(connection, run_id)
-            connection.executemany(
-                "INSERT INTO records (run_id, kind, data, timestamp) VALUES (?, ?, ?, ?)",
-                [
-                    (run_id, record["kind"], json.dumps(record.get("data", {})), _now())
-                    for record in records
-                ],
-            )
+            for record in records:
+                if not isinstance(record.get("kind"), str) or not record["kind"]:
+                    raise ValueError("record kind must be a non-empty string")
+                connection.execute(
+                    "INSERT INTO records (run_id, kind, data, timestamp) VALUES (?, ?, ?, ?)",
+                    (run_id, record["kind"], json.dumps(record.get("data", {})), _now()),
+                )
 
     def progress(self, run_id, current, total):
         if total <= 0 or current < 0 or current > total:
