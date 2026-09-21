@@ -1,9 +1,14 @@
-"""One bounded, persisted JEV stock decision."""
+"""Bounded, persisted JEV stock decisions."""
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 import json
 from urllib.request import Request, urlopen
+
+
+from .historical_data import SYMBOLS
+from .strategy import TrendMomentumV1
 
 
 MODEL = "jev-1.13.0"
@@ -63,6 +68,26 @@ class TypeSafeDecisionProvider:
     def _request(request):
         with urlopen(request, timeout=10) as response:
             return response.read()
+
+
+def obtain_minute_decisions(run_id, market, account, minute, provider, store, strategy=None):
+    """Return all three validated decisions without changing the account.
+
+    Build every request from the same immutable snapshot before starting calls.
+    Providers must support concurrent calls; each stock retains its own retries.
+    Ineligible minutes are rejected before any provider call or persistence.
+    """
+    strategy = strategy or TrendMomentumV1()
+    requests = [strategy.request(market, account, symbol, minute) for symbol in SYMBOLS]
+    if any(request is None or request.symbol != symbol or request.minute != minute
+           for symbol, request in zip(SYMBOLS, requests)):
+        raise ValueError("minute must have an eligible request for every stock")
+    with ThreadPoolExecutor(max_workers=len(SYMBOLS)) as executor:
+        futures = {
+            request.symbol: executor.submit(obtain_decision, run_id, request, provider, store)
+            for request in requests
+        }
+        return {symbol: future.result() for symbol, future in futures.items()}
 
 
 def obtain_decision(run_id, request, provider, store):
