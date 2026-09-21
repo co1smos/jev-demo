@@ -118,6 +118,42 @@ class HttpRunTests(unittest.TestCase):
         self.assertNotIn('type="password"', page)
         self.assertNotIn("API key", page)
 
+    def test_completed_run_audit_json_csv_and_page_filters(self):
+        minute = "2026-09-18T14:30:00Z"
+        decision = {
+            "symbol": "AAPL", "minute": minute, "action": "BUY",
+            "probabilities": {"BUY": 0.75, "HOLD": 0.15, "SELL": 0.05, "ABSTAIN": 0.05},
+            "input": {"sma20": 101.5, "minutes_remaining": 330},
+            "input_version": "trend_momentum_v1", "question_version": "stock_action_v1",
+            "requested_model": "jev-1.13.0", "returned_model": "jev-1.13.0",
+        }
+        run_id = self.store.create({"trading_date": "2026-09-18", "method": "jev"})
+        self.store.complete(run_id, {
+            "decisions": [decision],
+            "actions": [{"symbol": "AAPL", "minute": minute, "action": "BUY",
+                         "available": True, "explanation": "open_to_10_percent_target"}],
+            "orders": [], "fills": [],
+        })
+
+        _, audit = self.request(
+            f"/api/runs/{run_id}/audit?symbol=AAPL&action=BUY&minute={minute}"
+        )
+        with urlopen(self.base_url + f"/api/runs/{run_id}/audit.csv?symbol=AAPL", timeout=2) as response:
+            csv_text = response.read().decode()
+            content_type = response.headers["Content-Type"]
+        with urlopen(self.base_url + "/", timeout=2) as response:
+            page = response.read().decode()
+
+        self.assertEqual("open_to_10_percent_target", audit["decisions"][0]["explanation"])
+        self.assertIn("text/csv", content_type)
+        self.assertIn("buy_probability", csv_text)
+        self.assertIn("0.75", csv_text)
+        self.assertNotIn("Authorization", csv_text)
+        self.assertIn('id="audit-symbol"', page)
+        self.assertIn('id="audit-action"', page)
+        self.assertIn('id="audit-minute"', page)
+        self.assertIn("Download CSV", page)
+
     def test_page_defaults_to_latest_completed_exchange_session(self):
         cases = (
             (
