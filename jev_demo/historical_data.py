@@ -193,6 +193,8 @@ class AlpacaHistoricalData:
                 raise HistoricalDataError("cached snapshot metadata mismatch")
             session_open = datetime.fromisoformat(self._timestamp(payload["session_open"]).replace("Z", "+00:00"))
             session_close = datetime.fromisoformat(self._timestamp(payload["session_close"]).replace("Z", "+00:00"))
+            if self.now().astimezone(timezone.utc) < session_close:
+                raise HistoricalDataError(f"{trading_date} is not complete")
             self._validate_bars(snapshot.bars)
             self._validate_complete(snapshot.bars, symbols, session_open, session_close)
             return snapshot

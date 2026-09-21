@@ -9,6 +9,28 @@ from jev_demo.historical_data import AlpacaHistoricalData, HistoricalDataError
 
 
 class HistoricalDataTests(unittest.TestCase):
+    def test_rejects_cached_snapshot_until_session_is_complete(self):
+        calendar = [{"date": "2026-09-18", "open": "09:30", "close": "09:31"}]
+        bars = {
+            symbol: [{"t": "2026-09-18T13:30:00Z", "o": 100, "h": 101,
+                      "l": 99, "c": 100.5, "v": 1000}]
+            for symbol in ("AAPL", "MSFT", "NVDA")
+        }
+        responses = iter((calendar, {"bars": bars}))
+        current_time = [datetime(2026, 9, 18, 13, 32, tzinfo=timezone.utc)]
+
+        with tempfile.TemporaryDirectory() as directory:
+            service = AlpacaHistoricalData(
+                "key", "secret", directory,
+                request=lambda _request: json.dumps(next(responses)).encode(),
+                now=lambda: current_time[0],
+            )
+            service.snapshot("2026-09-18")
+            current_time[0] = datetime(2026, 9, 18, 13, 30, tzinfo=timezone.utc)
+
+            with self.assertRaisesRegex(HistoricalDataError, "not complete"):
+                service.snapshot("2026-09-18")
+
     def test_rejects_self_consistent_incomplete_cached_snapshot(self):
         calendar = [{"date": "2026-09-18", "open": "09:30", "close": "09:31"}]
         bars = {
