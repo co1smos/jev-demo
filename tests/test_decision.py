@@ -1,11 +1,14 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 import tempfile
 import unittest
 from pathlib import Path
 
-from jev_demo.decision import TypeSafeDecisionProvider, obtain_decision
+from jev_demo.decision import TypeSafeDecisionProvider, obtain_decision, obtain_minute_decisions
 from jev_demo.run_store import RunStore
-from jev_demo.strategy import DecisionRequest, PositionState, StrategyFeatures, Trend
+from jev_demo.strategy import AccountSnapshot, DecisionRequest, Position, PositionState, StrategyFeatures, Trend
+from test_strategy import market
 
 
 REQUEST = DecisionRequest(
@@ -37,6 +40,70 @@ class DecisionTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_minute_waits_for_slow_stock_and_isolates_its_failure(self):
+        for failure in (TimeoutError(), {"action": "INVALID"}):
+            with self.subTest(failure=failure):
+                release = Event()
+                finished = {symbol: Event() for symbol in ("MSFT", "NVDA")}
+                calls = {symbol: [] for symbol in ("AAPL", "MSFT", "NVDA")}
+                account = AccountSnapshot((Position("MSFT", 7), Position("NVDA", 9)))
+                original = AccountSnapshot(account.positions)
+
+                class Provider:
+                    def decide(self, state, model, question):
+                        symbol = state["symbol"]
+                        calls[symbol].append(state)
+                        if symbol == "AAPL":
+                            if not release.wait(5):
+                                raise TimeoutError()
+                            if isinstance(failure, Exception):
+                                raise failure
+                            return failure
+                        if symbol == "MSFT":
+                            finished["NVDA"].wait(5)
+                        action = {"MSFT": "SELL", "NVDA": "BUY"}[symbol]
+                        finished[symbol].set()
+                        return {"model": model, "action": action, "probabilities": {
+                            option: float(option == action)
+                            for option in ("BUY", "HOLD", "SELL", "ABSTAIN")
+                        }}
+
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    pending = executor.submit(
+                        obtain_minute_decisions, self.run_id, market(), account,
+                        REQUEST.minute, Provider(), self.store,
+                    )
+                    try:
+                        for done in finished.values():
+                            self.assertTrue(done.wait(2), "other stocks must run while AAPL waits")
+                        self.assertFalse(pending.done(), "a partial decision set must not escape")
+                        self.assertEqual(original, account)
+                    finally:
+                        release.set()
+                    decisions = pending.result(timeout=5)
+
+                self.assertEqual({"AAPL": "ABSTAIN", "MSFT": "SELL", "NVDA": "BUY"},
+                                 {symbol: value["action"] for symbol, value in decisions.items()})
+                for symbol, quantity in (("AAPL", 0), ("MSFT", 7), ("NVDA", 9)):
+                    self.assertEqual(symbol, decisions[symbol]["symbol"])
+                    self.assertEqual(REQUEST.minute, decisions[symbol]["minute"])
+                    self.assertEqual(quantity, calls[symbol][0]["position_quantity"])
+                    self.assertEqual(3 if symbol == "AAPL" else 1, len(calls[symbol]))
+                self.assertEqual(original, account)
+                records = self.store.read(self.run_id)["records"][-3:]
+                self.assertEqual(set(decisions), {record["data"]["symbol"] for record in records})
+                self.assertTrue(all(record["kind"].startswith("jev_decision") for record in records))
+
+    def test_ineligible_minute_does_not_start_calls_or_persist_partial_results(self):
+        provider = FakeProvider([])
+        with self.assertRaises(ValueError):
+            obtain_minute_decisions(
+                self.run_id, market(), AccountSnapshot(),
+                "2026-09-18T14:29:00Z", provider, self.store,
+            )
+        self.assertEqual([], provider.calls)
+        self.assertEqual([], self.store.read(self.run_id)["records"])
 
     def test_fake_provider_returns_and_persists_a_bounded_decision(self):
         provider = FakeProvider([{
