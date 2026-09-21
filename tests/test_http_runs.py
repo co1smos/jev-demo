@@ -117,9 +117,23 @@ class HttpRunTests(unittest.TestCase):
         self.assertIn('id="comparison-summary"', page)
         self.assertIn('<caption>Method comparison</caption>', page)
         self.assertIn('<details id="equity-data">', page)
+        self.assertIn('id="result-status" role="status"', page)
+        self.assertIn('<caption>JEV fills</caption>', page)
+        self.assertIn('<caption>JEV fees</caption>', page)
+        self.assertIn('<caption>JEV ending positions</caption>', page)
+        self.assertIn('aria-busy', page)
+        self.assertIn('Showing the last loaded data.', page)
         self.assertIn('"/api/runs"', page)
         self.assertNotIn('type="password"', page)
         self.assertNotIn("API key", page)
+
+    def test_page_ignores_stale_selection_responses_and_retries_progress(self):
+        with urlopen(self.base_url + "/", timeout=2) as response:
+            page = response.read().decode()
+
+        self.assertIn("if(id!==selectedRun)return", page)
+        self.assertIn("Last known progress", page)
+        self.assertIn("setTimeout(()=>poll(id),1000)", page)
 
     def test_completed_run_audit_json_csv_and_page_filters(self):
         minute = "2026-09-18T14:30:00Z"
