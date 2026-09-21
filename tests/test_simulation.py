@@ -1,5 +1,8 @@
 import tempfile
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
@@ -233,6 +236,108 @@ class SimulationTests(unittest.TestCase):
             len([record for record in run["records"] if record["kind"].startswith("jev_decision")]),
         )
         self.assertEqual(12, len([record for record in run["records"] if record["kind"] == "action"]))
+
+    def test_concurrent_jev_workers_process_a_run_only_once(self):
+        snapshot = self._jev_snapshot()
+
+        class Provider:
+            def __init__(self):
+                self.calls = 0
+                self.lock = threading.Lock()
+
+            def decide(self, state, model, question):
+                with self.lock:
+                    self.calls += 1
+                time.sleep(0.02)
+                return {
+                    "model": model,
+                    "action": "HOLD",
+                    "probabilities": {
+                        option: float(option == "HOLD") for option in question["options"]
+                    },
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(Path(directory) / "runs.db")
+            request = SimulationRequest("2026-09-18", "jev")
+            run_id = store.create({**request.__dict__, "source_digest": snapshot.digest})
+            provider = Provider()
+            barrier = threading.Barrier(2)
+
+            def run():
+                barrier.wait()
+                return run_simulation(
+                    request, snapshot, store, run_id=run_id, decision_provider=provider
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = [future.result() for future in (executor.submit(run), executor.submit(run))]
+            persisted = store.read(run_id)
+
+        self.assertTrue(any(result["status"] == "completed" for result in results))
+        self.assertEqual(12, provider.calls)
+        self.assertEqual(12, len([
+            record for record in persisted["records"]
+            if record["kind"].startswith("jev_decision")
+        ]))
+
+    def test_jev_persists_minute_execution_before_a_later_interruption(self):
+        snapshot = self._jev_snapshot()
+
+        class Provider:
+            def decide(self, state, model, question):
+                if state["minutes_remaining"] == 4:
+                    raise KeyboardInterrupt
+                return {
+                    "model": model,
+                    "action": "BUY",
+                    "probabilities": {
+                        option: float(option == "BUY") for option in question["options"]
+                    },
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(Path(directory) / "runs.db")
+            request = SimulationRequest("2026-09-18", "jev")
+            run_id = store.create({**request.__dict__, "source_digest": snapshot.digest})
+            with self.assertRaises(KeyboardInterrupt):
+                run_simulation(
+                    request, snapshot, store, run_id=run_id, decision_provider=Provider()
+                )
+            records = store.read(run_id)["records"]
+
+        self.assertEqual(3, len([record for record in records if record["kind"] == "order"]))
+        self.assertEqual(3, len([record for record in records if record["kind"] == "fill"]))
+        self.assertTrue(any(record["kind"] == "position" for record in records))
+        self.assertTrue(any(record["kind"] == "ledger" for record in records))
+        self.assertTrue(any(record["kind"] == "equity" for record in records))
+
+    @staticmethod
+    def _jev_snapshot():
+        start = datetime(2026, 9, 18, 13, 30, tzinfo=timezone.utc)
+        symbols = ("AAPL", "MSFT", "NVDA")
+        bars = tuple(
+            Bar(
+                symbol,
+                (start + timedelta(minutes=minute)).isoformat().replace("+00:00", "Z"),
+                100,
+                101,
+                99,
+                100,
+                1000,
+            )
+            for minute in range(65)
+            for symbol in symbols
+        )
+        return MarketSnapshot(
+            "2026-09-18",
+            symbols,
+            bars,
+            Source(),
+            "d" * 64,
+            start.isoformat().replace("+00:00", "Z"),
+            (start + timedelta(minutes=65)).isoformat().replace("+00:00", "Z"),
+        )
 
 
 if __name__ == "__main__":

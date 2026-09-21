@@ -105,12 +105,11 @@ def run_jev(request, snapshot, decision_provider, store, run_id=None):
             raise ValueError("run does not match the simulation request")
         if existing["status"] == "completed":
             return existing
-        if existing["status"] != "running" or any(
-            record["kind"] in ("action", "order") or record["kind"].startswith("jev_decision")
-            for record in existing["records"]
-        ):
+        if existing["status"] != "running":
             raise ValueError("a partially processed JEV run cannot be replayed")
     run_id = run_id or store.create({**asdict(request), "source_digest": snapshot.digest})
+    if not store.claim(run_id):
+        return store.read(run_id)
     recorded = []
     actions = []
 
@@ -182,6 +181,7 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
     position_events = []
     ledger = [{"kind": "deposit", "amount": _text(STARTING_CASH)}]
     equity_points = []
+    fees = []
     pending = {}
     gross_sales = Decimal("0")
     sold_shares = 0
@@ -217,6 +217,10 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
         position_events.append({"symbol": symbol, "timestamp": timestamp, "quantity": quantities[symbol]})
 
     for index, (timestamp, bars) in enumerate(minutes):
+        order_start = len(orders)
+        fill_start = len(fills)
+        position_start = len(position_events)
+        ledger_start = len(ledger)
         submitted, actions = pending.pop(index, (None, {}))
         signal_equity = cash + sum(
             Decimal(str(bars[item].open)) * quantity for item, quantity in quantities.items()
@@ -240,22 +244,29 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
                     fill(symbol, "sell", quantities[symbol], signal_at, timestamp,
                          Decimal(str(bars[symbol].open)), "forced_close")
 
+            sec_fee = _fee(gross_sales * SEC_RATE) if request.trading_date >= "2026-04-04" else Decimal("0")
+            taf_fee = _fee(min(Decimal(sold_shares) * TAF_RATE, TAF_CAP))
+            fees.extend([
+                {"kind": "sec_section_31", "amount": _text(sec_fee)},
+                {"kind": "finra_taf", "amount": _text(taf_fee)},
+            ])
+            for fee in fees:
+                amount = Decimal(fee["amount"])
+                cash -= amount
+                ledger.append({"kind": fee["kind"], "amount": _text(-amount)})
+
         marks = sum(Decimal(str(bars[symbol].close)) * quantities[symbol] for symbol in snapshot.symbols)
         equity_points.append({"timestamp": timestamp, "cash": _text(cash), "equity": _text(cash + marks)})
+        store.append(run_id, [
+            *({"kind": "order", "data": item} for item in orders[order_start:]),
+            *({"kind": "fill", "data": item} for item in fills[fill_start:]),
+            *({"kind": "fee", "data": item} for item in fees if index == len(minutes) - 1),
+            *({"kind": "position", "data": item} for item in position_events[position_start:]),
+            {"kind": "equity", "data": equity_points[-1]},
+            *({"kind": "ledger", "data": item} for item in ledger[ledger_start:]),
+        ])
         if 60 <= index < len(minutes) - 1:
             pending[index + 1] = (timestamp, decide(index, quantities))
-
-    sec_fee = _fee(gross_sales * SEC_RATE) if request.trading_date >= "2026-04-04" else Decimal("0")
-    taf_fee = _fee(min(Decimal(sold_shares) * TAF_RATE, TAF_CAP))
-    fees = [
-        {"kind": "sec_section_31", "amount": _text(sec_fee)},
-        {"kind": "finra_taf", "amount": _text(taf_fee)},
-    ]
-    for fee in fees:
-        amount = Decimal(fee["amount"])
-        cash -= amount
-        ledger.append({"kind": fee["kind"], "amount": _text(-amount)})
-    equity_points[-1]["cash"] = equity_points[-1]["equity"] = _text(cash)
 
     positions = [
         {"symbol": symbol, "quantity": 0, "realized_pnl": _text(realized[symbol])}
@@ -283,15 +294,8 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
         result["decisions"] = decisions
     if action_records is not None:
         result["actions"] = action_records
-    store.append(run_id, [
-        *({"kind": "decision", "data": item} for item in decisions or () if request.method != "jev"),
-        *({"kind": "order", "data": item} for item in orders),
-        *({"kind": "fill", "data": item} for item in fills),
-        *({"kind": "fee", "data": item} for item in fees),
-        *({"kind": "position", "data": item} for item in position_events),
-        *({"kind": "equity", "data": item} for item in equity_points),
-        *({"kind": "ledger", "data": item} for item in ledger),
-    ])
+    if request.method != "jev":
+        store.append(run_id, ({"kind": "decision", "data": item} for item in decisions or ()))
     store.progress(run_id, 2, 2)
     store.complete(run_id, result)
     return store.read(run_id)

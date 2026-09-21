@@ -35,6 +35,10 @@ class RunStore:
                     data TEXT NOT NULL,
                     timestamp TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS run_claims (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+                    timestamp TEXT NOT NULL
+                );
                 """
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
@@ -104,6 +108,21 @@ class RunStore:
                     "INSERT INTO records (run_id, kind, data, timestamp) VALUES (?, ?, ?, ?)",
                     (run_id, record["kind"], json.dumps(record.get("data", {})), _now()),
                 )
+
+    def claim(self, run_id):
+        """Atomically claim a running job for one worker."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if row["status"] != "running":
+                return False
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO run_claims (run_id, timestamp) VALUES (?, ?)",
+                (run_id, _now()),
+            )
+            return cursor.rowcount == 1
 
     def progress(self, run_id, current, total):
         if total <= 0 or current < 0 or current > total:
