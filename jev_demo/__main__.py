@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 from .audit import audit_csv, read_audit
 from .decision import TypeSafeDecisionProvider
 from .historical_data import AlpacaHistoricalData
+from .read_model import comparison
 from .run_store import RunStore
 from .simulation import SimulationRequest, run_simulation
 
@@ -59,7 +60,17 @@ class RunApplication:
                 snapshot = data.snapshot(request["trading_date"]).snapshot
                 self.store.progress(run_id, 1, 2)
                 run_simulation(
-                    SimulationRequest(request["trading_date"], "jev"),
+                    SimulationRequest(request["trading_date"], "sma20_sma60", run_id),
+                    snapshot,
+                    self.store,
+                )
+                run_simulation(
+                    SimulationRequest(request["trading_date"], "buy_and_hold", run_id),
+                    snapshot,
+                    self.store,
+                )
+                run_simulation(
+                    SimulationRequest(request["trading_date"], "jev", run_id),
                     snapshot,
                     self.store,
                     run_id=run_id,
@@ -135,6 +146,15 @@ def handler_for(application, latest_date=latest_historical_date):
                 else:
                     self._json(200, audit)
                 return
+            comparison_match = re.fullmatch(r"/api/runs/([^/]+)/comparison", path)
+            if comparison_match:
+                try:
+                    self._json(200, comparison(application.store, comparison_match.group(1)))
+                except KeyError:
+                    self._json(404, {"error": "run not found"})
+                except ValueError as error:
+                    self._json(409, {"error": str(error)})
+                return
             match = re.fullmatch(r"/api/runs/([^/]+)(/result)?", path)
             if match:
                 try:
@@ -161,8 +181,10 @@ form{{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap}}
 label{{display:block;font-weight:600}}button,input,select{{font:inherit;padding:.5rem}}
 button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{{outline:3px solid #165dff;outline-offset:2px}}
 .notice{{border-left:.35rem solid #b45309;padding:.5rem 1rem;background:#fff7ed}}
-table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccc;padding:.4rem;text-align:left;vertical-align:top}}
+table{{border-collapse:collapse;width:100%;display:block;overflow:auto}}th,td{{border:1px solid #ccc;padding:.4rem;text-align:left;vertical-align:top}}
+#comparison-summary th,#comparison-summary td{{text-align:right}}#comparison-summary th:first-child,#comparison-summary td:first-child{{text-align:left}}
 pre{{white-space:pre-wrap;margin:0}}
+svg{{width:100%;height:12rem;border:1px solid #ccc}}
 </style>
 <h1>JEV Simulator</h1>
 <p class="notice"><strong>Historical paper trading only.</strong> No live orders or financial advice.</p>
@@ -188,16 +210,29 @@ pre{{white-space:pre-wrap;margin:0}}
     <p id="audit-count" role="status"></p>
     <table><thead><tr><th>Minute / stock</th><th>Decision evidence</th><th>Explanation / execution</th></tr></thead><tbody id="audit-rows"></tbody></table>
   </section>
+  <section id="comparison-summary" hidden>
+    <h2>Method comparison</h2>
+    <table><caption>Method comparison</caption><thead><tr><th>Method</th><th>Net profit</th><th>Return</th><th>Max drawdown</th><th>Trades</th><th>Total costs</th><th>vs buy-and-hold</th></tr></thead><tbody id="comparison-body"></tbody></table>
+    <h3>Equity curve</h3>
+    <p id="equity-summary"></p>
+    <svg id="equity-chart" viewBox="0 0 600 200" aria-hidden="true"></svg>
+    <details id="equity-data"><summary>Show exact equity data</summary><table><caption>Equity by method and time</caption><thead><tr><th>Method</th><th>Time</th><th>Equity</th></tr></thead><tbody></tbody></table></details>
+    <h3>Per-stock contribution</h3>
+    <table><caption>Per-stock contribution</caption><thead><tr><th>Method</th><th>Stock</th><th>Contribution</th></tr></thead><tbody id="contribution-body"></tbody></table>
+  </section>
 </main>
 <script>
-const form=document.querySelector("#run-form"),status=document.querySelector("#run-status"),list=document.querySelector("#completed-runs"),button=form.querySelector("button"),audit=document.querySelector("#audit"),filters=document.querySelector("#audit-filters"),rows=document.querySelector("#audit-rows"),count=document.querySelector("#audit-count"),csv=document.querySelector("#audit-csv");let selectedRun;
+const form=document.querySelector("#run-form"),status=document.querySelector("#run-status"),list=document.querySelector("#completed-runs"),button=form.querySelector("button"),audit=document.querySelector("#audit"),filters=document.querySelector("#audit-filters"),rows=document.querySelector("#audit-rows"),count=document.querySelector("#audit-count"),csv=document.querySelector("#audit-csv"),summary=document.querySelector("#comparison-summary");let selectedRun;
+const money=new Intl.NumberFormat(undefined,{{style:"currency",currency:"USD"}}),percent=new Intl.NumberFormat(undefined,{{style:"percent",maximumFractionDigits:2}});
 async function request(url,options){{const response=await fetch(url,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}}
 function show(run){{if(run.status==="running"){{const p=run.progress;status.textContent=`Run in progress: ${{p.current}} of ${{p.total}} steps complete.`}}else if(run.status==="failed")status.textContent=`Run failed: ${{run.error}}`;else status.textContent="Run completed."}}
-async function completedRuns(){{try{{const runs=await request("/api/runs");const completed=runs.filter(run=>run.status==="completed");list.replaceChildren(...(completed.length?completed.map(run=>{{const item=document.createElement("li"),pick=document.createElement("button");pick.type="button";pick.textContent=`${{run.request.trading_date}} — completed ${{new Date(run.updated_at).toLocaleString()}}`;pick.addEventListener("click",()=>selectRun(run.id));item.append(pick);return item}}):[Object.assign(document.createElement("li"),{{textContent:"No completed runs yet."}})]))}}catch(error){{list.textContent=error.message}}}}
+function cell(row,value){{const item=document.createElement("td");item.textContent=value;row.append(item)}}
 function auditUrl(extension=""){{const query=new URLSearchParams(new FormData(filters));for(const [key,value] of [...query])if(!value)query.delete(key);return `/api/runs/${{selectedRun}}/audit${{extension}}?${{query}}`}}
 async function loadAudit(){{try{{const data=await request(auditUrl());rows.replaceChildren(...data.decisions.map(decision=>{{const row=document.createElement("tr");for(const value of [`${{decision.minute}}\n${{decision.symbol}}`,JSON.stringify({{action:decision.action,probabilities:decision.probabilities,input:decision.input,error:decision.error}},null,2),JSON.stringify({{explanation:decision.explanation,orders:decision.orders,fills:decision.fills}},null,2)]){{const cell=document.createElement("td"),pre=document.createElement("pre");pre.textContent=value;cell.append(pre);row.append(cell)}}return row}}));count.textContent=`${{data.decisions.length}} decision${{data.decisions.length===1?"":"s"}}.`;csv.href=auditUrl(".csv")}}catch(error){{count.textContent=error.message}}}}
-function selectRun(id){{selectedRun=id;audit.hidden=false;loadAudit()}}
+async function showComparison(id){{try{{const data=await request(`/api/runs/${{id}}/comparison`),body=document.querySelector("#comparison-body"),contributions=document.querySelector("#contribution-body"),equities=document.querySelector("#equity-data tbody"),svg=document.querySelector("#equity-chart");body.replaceChildren();contributions.replaceChildren();equities.replaceChildren();svg.replaceChildren();const colors=["#165dff","#b45309","#047857"],all=data.methods.flatMap(method=>method.equity_curve.map(point=>Number(point.equity))),low=Math.min(...all),high=Math.max(...all),span=high-low||1;data.methods.forEach((method,index)=>{{const row=document.createElement("tr");cell(row,method.method);cell(row,money.format(method.net_profit));cell(row,percent.format(method.return));cell(row,percent.format(method.maximum_drawdown_return));cell(row,method.trade_count);cell(row,money.format(method.total_costs));cell(row,money.format(method.difference_from_buy_and_hold.net_profit));body.append(row);Object.entries(method.per_stock_contribution).forEach(([symbol,value])=>{{const contribution=document.createElement("tr");cell(contribution,method.method);cell(contribution,symbol);cell(contribution,money.format(value));contributions.append(contribution)}});method.equity_curve.forEach(point=>{{const exact=document.createElement("tr");cell(exact,method.method);cell(exact,point.timestamp);cell(exact,money.format(point.equity));equities.append(exact)}});const line=document.createElementNS("http://www.w3.org/2000/svg","polyline"),last=Math.max(method.equity_curve.length-1,1);line.setAttribute("points",method.equity_curve.map((point,i)=>`${{i/last*600}},${{190-(Number(point.equity)-low)/span*180}}`).join(" "));line.setAttribute("fill","none");line.setAttribute("stroke",colors[index]);line.setAttribute("stroke-width","3");svg.append(line)}});document.querySelector("#equity-summary").textContent=`Equity ranges from ${{money.format(low)}} to ${{money.format(high)}}. Exact values follow.`;summary.hidden=false}}catch(error){{status.textContent=error.message}}}}
+function selectRun(id){{selectedRun=id;audit.hidden=false;loadAudit();showComparison(id)}}
 filters.addEventListener("submit",event=>{{event.preventDefault();loadAudit()}});
+async function completedRuns(){{try{{const runs=await request("/api/runs");const completed=runs.filter(run=>run.status==="completed"&&run.request.method==="jev");list.replaceChildren(...(completed.length?completed.map(run=>{{const item=document.createElement("li"),select=document.createElement("button");select.type="button";select.textContent=`${{run.request.trading_date}} — completed ${{new Date(run.updated_at).toLocaleString()}}`;select.addEventListener("click",()=>selectRun(run.id));item.append(select);return item}}):[Object.assign(document.createElement("li"),{{textContent:"No completed runs yet."}})]))}}catch(error){{list.textContent=error.message}}}}
 async function poll(id){{try{{const run=await request(`/api/runs/${{id}}`);show(run);if(run.status==="running")setTimeout(()=>poll(id),1000);else{{button.disabled=false;completedRuns()}}}}catch(error){{status.textContent=error.message;button.disabled=false}}}}
 form.addEventListener("submit",async event=>{{event.preventDefault();button.disabled=true;status.textContent="Starting run…";try{{const run=await request("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}},body:JSON.stringify({{trading_date:form.trading_date.value}})}});show(run);poll(run.id)}}catch(error){{status.textContent=`Could not start run: ${{error.message}}`;button.disabled=false}}}});
 completedRuns();

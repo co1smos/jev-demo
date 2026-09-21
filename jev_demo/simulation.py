@@ -20,6 +20,7 @@ CENT = Decimal("0.01")
 class SimulationRequest:
     trading_date: str
     method: str = "buy_and_hold"
+    comparison_group_id: str | None = None
 
 
 def _text(value):
@@ -275,8 +276,10 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
     ledger_cash = sum(Decimal(entry["amount"]) for entry in ledger)
     result = {
         "method": request.method,
+        "comparison_group_id": request.comparison_group_id or run_id,
         "source_digest": snapshot.digest,
         "starting_cash": _text(STARTING_CASH),
+        "allocation_cap": _text(POSITION_CAP),
         "ending_cash": _text(cash),
         "ending_equity": _text(cash),
         "net_pnl": _text(cash - STARTING_CASH),
