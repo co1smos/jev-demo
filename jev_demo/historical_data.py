@@ -124,7 +124,7 @@ class AlpacaHistoricalData:
             "symbols": ",".join(symbols),
             "timeframe": self.source.timeframe,
             "start": session_open.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "end": session_close.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "end": (session_close - timedelta(minutes=1)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
             "feed": self.source.feed,
             "limit": 10000,
             "sort": "asc",
