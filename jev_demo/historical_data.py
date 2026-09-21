@@ -45,6 +45,8 @@ class MarketSnapshot:
     bars: tuple[Bar, ...]
     source: Source
     digest: str
+    session_open: str = ""
+    session_close: str = ""
 
 
 @dataclass(frozen=True)
@@ -225,7 +227,8 @@ class AlpacaHistoricalData:
         try:
             return MarketSnapshot(
                 payload["trading_date"], tuple(payload["symbols"]),
-                tuple(Bar(**bar) for bar in payload["bars"]), Source(**payload["source"]), payload["digest"]
+                tuple(Bar(**bar) for bar in payload["bars"]), Source(**payload["source"]), payload["digest"],
+                payload["session_open"], payload["session_close"]
             )
         except (KeyError, TypeError, ValueError) as error:
             raise HistoricalDataError("malformed snapshot") from error
