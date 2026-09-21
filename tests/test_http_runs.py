@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import date, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -99,6 +100,23 @@ class HttpRunTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as caught:
             self.request("/api/runs", "POST", {"trading_date": "not-a-date"})
         self.assertEqual(400, caught.exception.code)
+
+    def test_page_exposes_accessible_run_workflow_without_api_key_fields(self):
+        with urlopen(self.base_url + "/", timeout=2) as response:
+            page = response.read().decode()
+
+        latest = date.today() - timedelta(days=1)
+        while latest.weekday() > 4:
+            latest -= timedelta(days=1)
+        self.assertIn("Historical paper trading", page)
+        self.assertIn('<label for="trading-date">Trading date</label>', page)
+        self.assertIn('type="date" id="trading-date"', page)
+        self.assertIn(f'value="{latest.isoformat()}"', page)
+        self.assertIn('id="run-status" role="status"', page)
+        self.assertIn('id="completed-runs"', page)
+        self.assertIn('"/api/runs"', page)
+        self.assertNotIn('type="password"', page)
+        self.assertNotIn("API key", page)
 
     def test_restart_preserves_completed_and_fails_interrupted_runs(self):
         completed = self.store.create({"trading_date": "2026-09-17", "method": "buy_and_hold"})
