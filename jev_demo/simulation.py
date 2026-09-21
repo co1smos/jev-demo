@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, ROUND_CEILING
 from itertools import groupby
 
+from .strategy import AccountSnapshot, Action, Position, TrendMomentumV1, crossover_action
 
 STARTING_CASH = Decimal("100000")
 POSITION_CAP = Decimal("0.10")
@@ -28,10 +29,63 @@ def _fee(value):
     return value.quantize(CENT, rounding=ROUND_CEILING)
 
 
+def run_simulation(request, snapshot, store):
+    """Run a supported method through the shared persisted simulation seam."""
+    if not isinstance(request, SimulationRequest):
+        raise ValueError("a SimulationRequest is required")
+    if request.method == "buy_and_hold":
+        return run_buy_and_hold(request, snapshot, store)
+    if request.method == "sma20_sma60":
+        return run_sma_crossover(request, snapshot, store)
+    raise ValueError(f"unsupported simulation method: {request.method}")
+
+
 def run_buy_and_hold(request, snapshot, store):
     """Run and persist the v1 buy-and-hold benchmark."""
     if not isinstance(request, SimulationRequest) or request.method != "buy_and_hold":
         raise ValueError("a buy-and-hold SimulationRequest is required")
+
+    def decisions(index, _quantities):
+        return {symbol: Action.BUY for symbol in snapshot.symbols} if index == 60 else {}
+
+    return _run(request, snapshot, store, decisions)
+
+
+def run_sma_crossover(request, snapshot, store):
+    """Run and persist the deterministic SMA20/SMA60 comparison."""
+    if not isinstance(request, SimulationRequest) or request.method != "sma20_sma60":
+        raise ValueError("an sma20_sma60 SimulationRequest is required")
+
+    strategy = TrendMomentumV1()
+    previous = {symbol: None for symbol in snapshot.symbols}
+    recorded = []
+
+    def decisions(index, quantities):
+        minute = snapshot.bars[index * len(snapshot.symbols)].timestamp
+        account = AccountSnapshot(tuple(
+            Position(symbol, quantity) for symbol, quantity in quantities.items() if quantity
+        ))
+        actions = {}
+        for symbol in snapshot.symbols:
+            decision = strategy.request(snapshot, account, symbol, minute)
+            if decision is None:
+                continue
+            action = crossover_action(previous[symbol], decision.features.trend)
+            previous[symbol] = decision.features.trend
+            recorded.append({
+                "symbol": symbol,
+                "timestamp": minute,
+                "action": action.value,
+                "sma20": decision.features.sma20,
+                "sma60": decision.features.sma60,
+            })
+            actions[symbol] = action
+        return actions
+
+    return _run(request, snapshot, store, decisions, recorded)
+
+
+def _run(request, snapshot, store, decide, decisions=None):
     if request.trading_date != snapshot.trading_date:
         raise ValueError("request and snapshot trading dates differ")
 
@@ -49,63 +103,74 @@ def run_buy_and_hold(request, snapshot, store):
     cash = STARTING_CASH
     quantities = {symbol: 0 for symbol in snapshot.symbols}
     costs = {symbol: Decimal("0") for symbol in snapshot.symbols}
-    bought_quantities = {}
+    realized = {symbol: Decimal("0") for symbol in snapshot.symbols}
     orders = []
     fills = []
     position_events = []
     ledger = [{"kind": "deposit", "amount": _text(STARTING_CASH)}]
     equity_points = []
+    pending = {}
+    gross_sales = Decimal("0")
+    sold_shares = 0
 
-    def order(symbol, side, quantity, submitted, filled, reference, price, reason):
-        nonlocal cash
+    def fill(symbol, side, quantity, submitted, timestamp, reference, reason):
+        nonlocal cash, gross_sales, sold_shares
+        price = reference * (Decimal("1") + EXECUTION_COST if side == "buy" else Decimal("1") - EXECUTION_COST)
+        notional = price * quantity
         order_id = f"order-{len(orders) + 1}"
         fill_id = f"fill-{len(fills) + 1}"
-        notional = price * quantity
         orders.append({
             "id": order_id, "symbol": symbol, "side": side, "quantity": quantity,
-            "submitted_at": submitted, "fill_at": filled, "reason": reason,
+            "submitted_at": submitted, "fill_at": timestamp, "reason": reason,
         })
         fills.append({
             "id": fill_id, "order_id": order_id, "symbol": symbol, "side": side,
-            "quantity": quantity, "timestamp": filled, "reference_price": _text(reference),
+            "quantity": quantity, "timestamp": timestamp, "reference_price": _text(reference),
             "price": _text(price), "notional": _text(notional),
             "execution_cost": _text(abs(price - reference) * quantity),
         })
         amount = notional if side == "sell" else -notional
         cash += amount
         ledger.append({"kind": f"{side}_fill", "amount": _text(amount), "fill_id": fill_id})
-
-    entry_signal_at, _ = minutes[60]
-    entry_at, entry_fills = minutes[61]
-    target = STARTING_CASH * POSITION_CAP
-    for symbol in snapshot.symbols:
-        reference = Decimal(str(entry_fills[symbol].open))
-        price = reference * (Decimal("1") + EXECUTION_COST)
-        quantity = int(min(target, cash) // price)
-        if quantity:
-            order(symbol, "buy", quantity, entry_signal_at, entry_at, reference, price, "buy_and_hold")
+        if side == "buy":
             quantities[symbol] = quantity
-            bought_quantities[symbol] = quantity
-            costs[symbol] = price * quantity
-            position_events.append({"symbol": symbol, "timestamp": entry_at, "quantity": quantity})
-    holding_cash = cash
+            costs[symbol] = notional
+        else:
+            quantities[symbol] = 0
+            realized[symbol] += notional - costs[symbol]
+            costs[symbol] = Decimal("0")
+            gross_sales += notional
+            sold_shares += quantity
+        position_events.append({"symbol": symbol, "timestamp": timestamp, "quantity": quantities[symbol]})
 
-    exit_signal_at, _ = minutes[-2]
-    exit_at, exit_bars = minutes[-1]
-    gross_sales = Decimal("0")
-    sold_shares = 0
-    realized = {}
-    for symbol in snapshot.symbols:
-        quantity = quantities[symbol]
-        reference = Decimal(str(exit_bars[symbol].open))
-        price = reference * (Decimal("1") - EXECUTION_COST)
-        gross_sales += price * quantity
-        sold_shares += quantity
-        realized[symbol] = price * quantity - costs[symbol]
-        if quantity:
-            order(symbol, "sell", quantity, exit_signal_at, exit_at, reference, price, "forced_close")
-        quantities[symbol] = 0
-        position_events.append({"symbol": symbol, "timestamp": exit_at, "quantity": 0})
+    for index, (timestamp, bars) in enumerate(minutes):
+        submitted, actions = pending.pop(index, (None, {}))
+        signal_equity = cash + sum(
+            Decimal(str(bars[item].open)) * quantity for item, quantity in quantities.items()
+        )
+        for symbol in snapshot.symbols:
+            action = actions.get(symbol, Action.HOLD)
+            reference = Decimal(str(bars[symbol].open))
+            if (action is Action.BUY and not quantities[symbol]
+                    and (request.method == "buy_and_hold" or index < len(minutes) - 1)):
+                price = reference * (Decimal("1") + EXECUTION_COST)
+                quantity = int(min(signal_equity * POSITION_CAP, cash) // price)
+                if quantity:
+                    fill(symbol, "buy", quantity, submitted, timestamp, reference, request.method)
+            elif action is Action.SELL and quantities[symbol]:
+                fill(symbol, "sell", quantities[symbol], submitted, timestamp, reference, request.method)
+
+        if index == len(minutes) - 1:
+            signal_at = minutes[index - 1][0]
+            for symbol in snapshot.symbols:
+                if quantities[symbol]:
+                    fill(symbol, "sell", quantities[symbol], signal_at, timestamp,
+                         Decimal(str(bars[symbol].open)), "forced_close")
+
+        marks = sum(Decimal(str(bars[symbol].close)) * quantities[symbol] for symbol in snapshot.symbols)
+        equity_points.append({"timestamp": timestamp, "cash": _text(cash), "equity": _text(cash + marks)})
+        if 60 <= index < len(minutes) - 1:
+            pending[index + 1] = (timestamp, decide(index, quantities))
 
     sec_fee = _fee(gross_sales * SEC_RATE) if request.trading_date >= "2026-04-04" else Decimal("0")
     taf_fee = _fee(min(Decimal(sold_shares) * TAF_RATE, TAF_CAP))
@@ -117,20 +182,7 @@ def run_buy_and_hold(request, snapshot, store):
         amount = Decimal(fee["amount"])
         cash -= amount
         ledger.append({"kind": fee["kind"], "amount": _text(-amount)})
-
-    for timestamp, bars in minutes:
-        marks = Decimal("0")
-        # Positions exist from the entry fill until the forced-close fill.
-        if entry_at <= timestamp < exit_at:
-            marks = sum(Decimal(str(bars[symbol].close)) * bought_quantities.get(symbol, 0)
-                        for symbol in snapshot.symbols)
-            point_cash = holding_cash
-        elif timestamp < entry_at:
-            point_cash = STARTING_CASH
-        else:
-            point_cash = cash
-        equity_points.append({"timestamp": timestamp, "cash": _text(point_cash),
-                              "equity": _text(point_cash + marks)})
+    equity_points[-1]["cash"] = equity_points[-1]["equity"] = _text(cash)
 
     positions = [
         {"symbol": symbol, "quantity": 0, "realized_pnl": _text(realized[symbol])}
@@ -153,7 +205,10 @@ def run_buy_and_hold(request, snapshot, store):
         "execution_model_version": "next_minute_open_2bps_v1",
         "fee_version": "us_equity_2026_v1",
     }
+    if decisions is not None:
+        result["decisions"] = decisions
     store.append(run_id, [
+        *({"kind": "decision", "data": item} for item in decisions or ()),
         *({"kind": "order", "data": item} for item in orders),
         *({"kind": "fill", "data": item} for item in fills),
         *({"kind": "fee", "data": item} for item in fees),

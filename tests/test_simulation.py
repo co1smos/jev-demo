@@ -6,10 +6,19 @@ from pathlib import Path
 
 from jev_demo.historical_data import Bar, MarketSnapshot, Source
 from jev_demo.run_store import RunStore
-from jev_demo.simulation import SimulationRequest, run_buy_and_hold
+from jev_demo.simulation import SimulationRequest, run_buy_and_hold, run_simulation
+from jev_demo.strategy import Action, Trend, crossover_action
 
 
 class SimulationTests(unittest.TestCase):
+    def test_crossover_actions_cover_buy_hold_and_sell(self):
+        self.assertEqual(Action.BUY, crossover_action(Trend.BELOW, Trend.ABOVE))
+        self.assertEqual(Action.SELL, crossover_action(Trend.ABOVE, Trend.BELOW))
+        self.assertEqual(Action.BUY, crossover_action(Trend.EQUAL, Trend.ABOVE))
+        self.assertEqual(Action.SELL, crossover_action(Trend.EQUAL, Trend.BELOW))
+        self.assertEqual(Action.HOLD, crossover_action(Trend.ABOVE, Trend.ABOVE))
+        self.assertEqual(Action.HOLD, crossover_action(None, Trend.ABOVE))
+
     def test_buy_and_hold_completes_and_reconciles_through_the_public_seam(self):
         start = datetime(2026, 9, 18, 13, 30, tzinfo=timezone.utc)
         symbols = ("AAPL", "MSFT", "NVDA")
@@ -75,6 +84,63 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(ending_cash, Decimal(result["ending_equity"]))
         self.assertEqual(ending_cash - Decimal("100000"), Decimal(result["net_pnl"]))
         self.assertEqual("0.00", result["reconciliation_difference"])
+
+    def test_sma_crossover_uses_completed_bars_and_the_same_simulation_seam(self):
+        start = datetime(2026, 9, 18, 13, 30, tzinfo=timezone.utc)
+        symbols = ("AAPL", "MSFT", "NVDA")
+        closes = [100] * 40 + [90] * 20 + [500, 1, 1, 1, 1, 1, 1]
+        bars = tuple(
+            Bar(
+                symbol,
+                (start + timedelta(minutes=minute)).isoformat().replace("+00:00", "Z"),
+                close,
+                close,
+                close,
+                close,
+                1000,
+            )
+            for minute, close in enumerate(closes)
+            for symbol in symbols
+        )
+        snapshot = MarketSnapshot(
+            "2026-09-18",
+            symbols,
+            bars,
+            Source(),
+            "b" * 64,
+            start.isoformat().replace("+00:00", "Z"),
+            (start + timedelta(minutes=len(closes))).isoformat().replace("+00:00", "Z"),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(Path(directory) / "runs.db")
+            run = run_simulation(
+                SimulationRequest("2026-09-18", "sma20_sma60"), snapshot, store
+            )
+
+        result = run["result"]
+        self.assertEqual("completed", run["status"])
+        self.assertEqual("sma20_sma60", result["method"])
+        self.assertTrue(all(
+            decision["timestamp"] >= bars[180].timestamp
+            for decision in result["decisions"]
+        ))
+        buy_orders = [order for order in result["orders"] if order["side"] == "buy"]
+        self.assertEqual(3, len(buy_orders))
+        self.assertTrue(all(order["submitted_at"] == bars[183].timestamp for order in buy_orders))
+        self.assertTrue(all(order["fill_at"] == bars[186].timestamp for order in buy_orders))
+        sell_orders = [
+            order for order in result["orders"]
+            if order["side"] == "sell" and order["reason"] == "sma20_sma60"
+        ]
+        self.assertEqual(3, len(sell_orders))
+        self.assertTrue(all(order["submitted_at"] == bars[192].timestamp for order in sell_orders))
+        self.assertTrue(all(order["fill_at"] == bars[195].timestamp for order in sell_orders))
+        self.assertEqual({"BUY", "HOLD", "SELL"}, {
+            decision["action"] for decision in result["decisions"]
+        })
+        self.assertEqual("0.00", result["reconciliation_difference"])
+        self.assertTrue(all(position["quantity"] == 0 for position in result["positions"]))
 
 
 if __name__ == "__main__":
