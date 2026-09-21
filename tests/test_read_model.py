@@ -19,6 +19,7 @@ class ReadModelTests(unittest.TestCase):
                 run_id = store.create({"trading_date": "2026-09-18", "method": method})
                 store.complete(run_id, {
                     "method": method,
+                    "comparison_group_id": "comparison-1",
                     "source_digest": "a" * 64,
                     "starting_cash": "100",
                     "allocation_cap": "0.10",
@@ -60,6 +61,52 @@ class ReadModelTests(unittest.TestCase):
             "execution_model_version": "execution-v1",
             "fee_version": "fees-v1",
         }, result["shared_assumptions"])
+
+    def test_repeated_simulation_keeps_the_selected_comparison_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(Path(directory) / "runs.db")
+            selected = None
+            for group, profit in (("first", 1), ("second", 20)):
+                for method in ("jev", "sma20_sma60", "buy_and_hold"):
+                    run_id = store.create({"trading_date": "2026-09-18", "method": method})
+                    store.complete(run_id, {
+                        "method": method,
+                        "comparison_group_id": group,
+                        "source_digest": "a" * 64,
+                        "starting_cash": "100",
+                        "allocation_cap": "0.10",
+                        "ending_equity": str(100 + profit),
+                        "fills": [],
+                        "fees": [],
+                        "equity_points": [{"timestamp": "09:30", "equity": "100"}],
+                        "execution_model_version": "execution-v1",
+                        "fee_version": "fees-v1",
+                    })
+                    if group == "first" and method == "jev":
+                        selected = run_id
+            newer_same_group = store.create({
+                "trading_date": "2026-09-18", "method": "jev"
+            })
+            store.complete(newer_same_group, {
+                "method": "jev",
+                "comparison_group_id": "first",
+                "source_digest": "a" * 64,
+                "starting_cash": "100",
+                "allocation_cap": "0.10",
+                "ending_equity": "199",
+                "fills": [],
+                "fees": [],
+                "equity_points": [{"timestamp": "09:30", "equity": "100"}],
+                "execution_model_version": "execution-v1",
+                "fee_version": "fees-v1",
+            })
+
+            result = comparison(store, selected)
+
+        self.assertEqual("1", result["methods"][0]["net_profit"])
+        self.assertTrue(all(
+            method["net_profit"] == "1" for method in result["methods"]
+        ))
 
 
 if __name__ == "__main__":

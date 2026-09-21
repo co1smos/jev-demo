@@ -127,6 +127,7 @@ class HttpRunTests(unittest.TestCase):
             run_id = self.store.create({"trading_date": "2026-09-18", "method": method})
             self.store.complete(run_id, {
                 "method": method,
+                "comparison_group_id": "comparison-1",
                 "source_digest": "a" * 64,
                 "starting_cash": "100000",
                 "allocation_cap": "0.10",

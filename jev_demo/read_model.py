@@ -63,13 +63,15 @@ def comparison(store, run_id):
     if selected["status"] != "completed":
         raise ValueError("comparison requires a completed run")
     assumptions = {key: selected["result"][key] for key in ASSUMPTIONS}
+    comparison_group_id = selected["result"]["comparison_group_id"]
     trading_date = selected["request"]["trading_date"]
-    runs = {}
+    runs = {selected["result"]["method"]: selected["result"]}
     for run in store.list():
         result = run["result"]
         if (run["status"] == "completed"
                 and run["request"].get("trading_date") == trading_date
                 and result.get("method") in METHODS
+                and result.get("comparison_group_id") == comparison_group_id
                 and all(result.get(key) == value for key, value in assumptions.items())):
             runs.setdefault(result["method"], result)
     missing = set(METHODS) - runs.keys()

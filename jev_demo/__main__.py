@@ -58,17 +58,17 @@ class RunApplication:
                 snapshot = data.snapshot(request["trading_date"]).snapshot
                 self.store.progress(run_id, 1, 2)
                 run_simulation(
-                    SimulationRequest(request["trading_date"], "sma20_sma60"),
+                    SimulationRequest(request["trading_date"], "sma20_sma60", run_id),
                     snapshot,
                     self.store,
                 )
                 run_simulation(
-                    SimulationRequest(request["trading_date"], "buy_and_hold"),
+                    SimulationRequest(request["trading_date"], "buy_and_hold", run_id),
                     snapshot,
                     self.store,
                 )
                 run_simulation(
-                    SimulationRequest(request["trading_date"], "jev"),
+                    SimulationRequest(request["trading_date"], "jev", run_id),
                     snapshot,
                     self.store,
                     run_id=run_id,
