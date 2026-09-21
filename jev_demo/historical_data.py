@@ -211,6 +211,8 @@ class AlpacaHistoricalData:
 
     @staticmethod
     def _timestamp(value):
+        if not isinstance(value, str):
+            raise ValueError
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.second or parsed.microsecond:
             raise ValueError

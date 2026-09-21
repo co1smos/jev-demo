@@ -72,6 +72,7 @@ class HistoricalDataTests(unittest.TestCase):
             "incomplete": (service([calendar], now=datetime(2026, 9, 18, 13, 31, tzinfo=timezone.utc)), "not complete"),
             "gap": (service([calendar, {"bars": {symbol: [valid_bar] for symbol in ("AAPL", "MSFT", "NVDA")}}]), "missing"),
             "malformed": (service([calendar, {"bars": {"AAPL": [{"bad": "bar"}]}}]), "malformed"),
+            "malformed timestamp": (service([calendar, {"bars": {"AAPL": [{**valid_bar, "t": None}]}}]), "malformed"),
             "unavailable": (service([OSError("offline")]), "unavailable"),
         }
         for name, (data, message) in cases.items():
