@@ -86,7 +86,15 @@ herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "issue-5
 herdr pane run <returned-root-pane-id> "SANDCASTLE_MODEL=gpt-5.6-sol SANDCASTLE_EFFORT=medium SANDCASTLE_BRANCH=sandcastle/issue-5 npm run sandcastle:reviewed -- --issue 5"
 ```
 
-Parse the tab and root pane IDs from the creation response. The controller is not a Codex session and consumes no model quota while it waits. For parallel frontier work, repeat with unique labels and branch names; never share a worktree or branch.
+Parse the tab and root pane IDs from the creation response. Immediately mark the controller pane as visibly working:
+
+```sh
+herdr pane report-agent <returned-root-pane-id> \
+  --source "sandcastle:issue-5" --agent sandcastle --state working \
+  --seq 1 --message "Issue #5 Sandcastle controller"
+```
+
+The controller is not a Hermes or Codex session and consumes no model quota while it waits. Its transient Codex implementer/reviewer panes appear inside the same issue tab. When the controller exits and Hermes has inspected its result, report `idle` with sequence 2 and a completion/failure message before closing or preserving the tab. A root pane left as `unknown` is not sufficiently visible. For parallel frontier work, repeat with unique labels, lifecycle sources, and branch names; never share a worktree or branch.
 
 Hermes must remain the outer orchestrator until every launched controller exits. After each launch, record its issue, controller tab/pane ID, wrapper PID, branch, and artifact directory; monitor each exact PID rather than reusable pane-output sentinels, and inspect every final artifact before reporting or merging. Do not end the turn with only a launch acknowledgement. When the controller exits, immediately report one of:
 
