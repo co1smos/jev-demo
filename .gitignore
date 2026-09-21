@@ -9,6 +9,14 @@ __pycache__/
 .venv/
 .pytest_cache/
 
+# Sandcastle runtime files
+.sandcastle/logs/
+.sandcastle/runs/
+.artifacts/
+node_modules/
+*.tsbuildinfo
+npm-debug.log*
+
 # Runtime data
 *.db
 *.sqlite

@@ -1,35 +1,69 @@
-# Agent workflow
+## Agent skills
 
-## Keep delegated work visible
+### Model routing
 
-- Run every delegated agent task in Herdr. Do not use hidden native subagents or background delegation for repository work.
-- Use one clearly labeled Herdr tab per substantial worker so the user can inspect and interact with it. A brief side-by-side command may use a pane.
-- Give each worker a narrow, self-contained brief with its output artifact and exclusions.
-- Parallelize independent work, but never let two workers edit the same artifact or checkout concurrently. Use separate worktrees for parallel implementation writers.
-- After prompting a worker, verify it entered `working` and install an explicit Herdr waiter. A launch alone is not monitoring.
-- Read and verify the worker's artifact or diff before reporting completion. Close only worker tabs created for completed work, and only after the user no longer needs to inspect them.
+Use the cheapest model appropriate for the task. The default Codex session uses
+`gpt-5.6-luna` with medium reasoning.
 
-## Model routing
+Handle simple implementation tasks directly in the current Luna agent. Simple
+tasks are mechanical edits, renames, formatting, boilerplate, straightforward
+tests, obvious small fixes, and changes whose implementation is already explicit.
 
-Use the cheapest capable model; do not spawn an agent just to classify a task.
+Use the `sol_worker` tier (`gpt-5.6-sol`, medium) for normal engineering work:
+features with clear requirements, normal bug fixes, related multi-file changes,
+business logic, normal code review, and refactoring that requires understanding
+existing code.
 
-- Research and design: use a visible Hermes agent directly. A research Hermes agent must do its own research and must not launch Codex, Claude, or hidden subagents.
-- Simple mechanical work: handle directly with `gpt-5.6-luna` at medium reasoning.
-- Normal research, design, engineering, multi-file changes, business logic, and review: use `gpt-5.6-sol` at medium reasoning.
-- Hard debugging, unclear architecture, concurrency, subtle correctness, or a failed Sol attempt: use `gpt-6-astra` at low reasoning.
-- Preflight the exact model and effort before launch. Prefer GPT. If the routed GPT model is unavailable, preflight `gemini-pro-agent` and use high reasoning; otherwise use the authenticated agent's verified default and report the fallback.
-- Do not escalate merely for confidence. Escalate only when assumptions remain unresolved or verification fails.
+Use the `astra_worker` tier (`gpt-6-astra`, low) for hard work: unclear root
+causes, difficult debugging, unfamiliar architecture, concurrency or distributed
+systems, large cross-component changes, ambiguous requirements, subtle
+correctness problems, or a failed Sol attempt.
 
-## Implementation
+Do not escalate merely to improve confidence, and do not spawn agents only to
+classify a task. Escalate Luna to Sol when substantial reasoning beyond
+mechanical execution is required. Escalate Sol to Astra only when the problem
+remains unresolved, important assumptions cannot be established, verification
+fails, or the task clearly belongs in the hard category.
 
-- Codex is for implementation only. Do not launch Codex for research, design, planning, or document review.
-- Use the official OpenAI Codex CLI as the default implementation worker.
-- Work in small vertical slices. For each slice: write a failing test at an agreed public seam, implement only enough to pass, then run the relevant tests, lint, and build.
-- Keep implementation workers read-only toward GitHub and shared lifecycle state unless the user explicitly authorizes publication.
+Before launching a delegated worker, preflight its exact model and reasoning
+effort. If that tier is unavailable, preflight the configured
+`gemini-pro-agent` model ID and use it with high reasoning. If
+`gemini-pro-agent` is unavailable or not configured, use the authenticated
+Codex account's verified default and report the fallback.
+
+Research and design use visible Hermes agents directly. A research Hermes agent
+must perform its own research and must not launch Codex, Claude, or hidden
+subagents. Codex is for implementation only.
+
+### Implementation workflow
+
+- Use the official OpenAI Codex CLI as the default coding agent for implementation work in this repository.
+- Apply the same model routing to direct Codex work and bounded Sandcastle/Codex iterations.
+- When asked to implement a GitHub issue with Codex or Sandcastle—including a concise request such as `Implement issue #5`—load and follow `docs/agents/implementation-workflow.md`. Hermes launches and continuously supervises the deterministic Sandcastle controller through completion; Sandcastle owns the no-sandbox issue worktree and test gates; each Codex phase runs visibly through Unsnooze in a fresh Herdr pane. Hermes must inspect the terminal result and immediately continue with local, reversible correction or finalization; a local-only watchdog is not user notification. The user need not provide shell commands.
+- Before Sandcastle preflight, Hermes routes each issue using the model rules above and passes the exact model/effort tuple to the controller. The controller repeats fresh implementer and independent reviewer rounds when the reviewer requests correctable changes. Failed gates, blocked verdicts, and errors remain terminal for that run.
+- Keep every delegated worker visible in a separate Herdr pane or tab. Do not use Codex's hidden native subagent spawning for repository work, even though `.codex/agents/*.toml` records the tier definitions.
+- The user has authorized separate background Herdr tabs for implementation workers. Keep the current tab focused and close worker tabs after their branch has been accepted, rejected, or safely preserved.
+- Give each worker one narrow dependency-ready issue and launch it with the model and reasoning values recorded in the matching `.codex/agents/*.toml` file.
+- Maximize safe parallelism from the native GitHub dependency frontier, up to three concurrent issue workers. Run fewer when fewer tickets are unblocked or likely file ownership overlaps. Never expose blocked tickets merely to fill capacity.
+- Every parallel issue gets a unique Herdr tab, Sandcastle run, branch, and no-sandbox worktree. Workers must not merge, push, close/comment/edit issues, or mutate shared lifecycle state.
+- Work in strict vertical RED → GREEN → REFACTOR cycles at the public seams in `docs/design.md`: write and observe a focused failing test first, implement the smallest passing behavior, then run focused and full checks.
 - Preserve deterministic control over money, risk limits, validation, idempotency, persistence, and test gates; do not delegate these safeguards to an LLM.
-- Review every worker diff and real test output before calling work complete.
+- Review each worker branch independently, rerun tests from that branch, merge reviewed branches one at a time, push, close the corresponding issue, and recompute the native dependency frontier before dispatching more work.
+- Continue autonomously through locally correctable findings and newly unblocked tickets. Stop only for a verified external prerequisite, destructive/irreversible choice, safety boundary, or user-reserved decision.
 
-## Project design
+### Issue tracker
+
+Issues and specs are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repository uses the five default canonical triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+
+### Project design
 
 - Prefer existing open-source or platform features over custom orchestration.
 - Keep interfaces small and modules deep; test through public seams rather than internals.

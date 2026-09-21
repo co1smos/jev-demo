@@ -1,0 +1,18 @@
+{
+  "name": "jev-demo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Historical paper-trading simulator for JEV-directed decisions.",
+  "scripts": {
+    "start": "python3 -m jev_demo",
+    "test": "node --test .sandcastle/workflow-core.test.mjs && python3 -m unittest discover -s tests -v && python3 -m compileall -q .",
+    "test:sandcastle": "node --test .sandcastle/workflow-core.test.mjs",
+    "sandcastle:reviewed": "npx tsx .sandcastle/main.mts",
+    "sandcastle:check": "npx tsx .sandcastle/main.mts --preflight"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0"
+  }
+}
