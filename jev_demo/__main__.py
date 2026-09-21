@@ -2,7 +2,7 @@ import json
 import os
 import re
 import threading
-from datetime import date, timedelta
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -12,10 +12,11 @@ from .simulation import SimulationRequest, run_buy_and_hold
 
 
 def latest_historical_date():
-    candidate = date.today() - timedelta(days=1)
-    while candidate.weekday() > 4:
-        candidate -= timedelta(days=1)
-    return candidate.isoformat()
+    return AlpacaHistoricalData(
+        os.environ.get("ALPACA_API_KEY"),
+        os.environ.get("ALPACA_API_SECRET"),
+        Path(os.environ.get("JEV_DEMO_CACHE", ".jev-demo-cache")),
+    ).latest_completed_date()
 
 
 def configuration():
@@ -64,7 +65,7 @@ class RunApplication:
         threading.Thread(target=work, daemon=True).start()
 
 
-def handler_for(application):
+def handler_for(application, latest_date=latest_historical_date):
     class Handler(BaseHTTPRequestHandler):
         def _json(self, status, value):
             body = json.dumps(value).encode()
@@ -108,6 +109,10 @@ def handler_for(application):
                 return
             if self.path == "/":
                 status = "Ready" if "missing" not in config.values() else "Configuration required"
+                try:
+                    default_date = latest_date()
+                except ValueError:
+                    default_date = ""
                 body = f'''<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -127,7 +132,7 @@ button:focus-visible,input:focus-visible{{outline:3px solid #165dff;outline-offs
   <h2>Start a run</h2>
   <form id="run-form">
     <div><label for="trading-date">Trading date</label>
-    <input type="date" id="trading-date" name="trading_date" value="{latest_historical_date()}" required></div>
+    <input type="date" id="trading-date" name="trading_date" value="{default_date}" required></div>
     <button type="submit">Run simulation</button>
   </form>
   <p id="run-status" role="status" aria-live="polite">No run in progress.</p>
