@@ -29,7 +29,7 @@ def _metrics(result):
         drawdown = peak - equity
         if drawdown > maximum_drawdown:
             maximum_drawdown = drawdown
-            maximum_drawdown_return = drawdown / peak
+        maximum_drawdown_return = max(maximum_drawdown_return, drawdown / peak)
     contributions = {}
     for fill in result["fills"]:
         amount = Decimal(fill["notional"])

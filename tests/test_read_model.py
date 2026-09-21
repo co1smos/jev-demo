@@ -108,6 +108,38 @@ class ReadModelTests(unittest.TestCase):
             method["net_profit"] == "1" for method in result["methods"]
         ))
 
+    def test_percentage_drawdown_is_independent_of_dollar_drawdown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(Path(directory) / "runs.db")
+            selected = None
+            for method in ("jev", "sma20_sma60", "buy_and_hold"):
+                run_id = store.create({"trading_date": "2026-09-18", "method": method})
+                store.complete(run_id, {
+                    "method": method,
+                    "comparison_group_id": "comparison-1",
+                    "source_digest": "a" * 64,
+                    "starting_cash": "100",
+                    "allocation_cap": "0.10",
+                    "ending_equity": "940",
+                    "fills": [],
+                    "fees": [],
+                    "equity_points": [
+                        {"timestamp": "09:30", "equity": "100"},
+                        {"timestamp": "09:31", "equity": "50"},
+                        {"timestamp": "09:32", "equity": "1000"},
+                        {"timestamp": "09:33", "equity": "940"},
+                    ],
+                    "execution_model_version": "execution-v1",
+                    "fee_version": "fees-v1",
+                })
+                if method == "jev":
+                    selected = run_id
+
+            result = comparison(store, selected)
+
+        self.assertEqual("60", result["methods"][0]["maximum_drawdown"])
+        self.assertEqual("0.5", result["methods"][0]["maximum_drawdown_return"])
+
 
 if __name__ == "__main__":
     unittest.main()
