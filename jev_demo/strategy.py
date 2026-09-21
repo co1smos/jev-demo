@@ -20,6 +20,12 @@ class PositionState(Enum):
     LONG = "long"
 
 
+class Action(Enum):
+    BUY = "BUY"
+    HOLD = "HOLD"
+    SELL = "SELL"
+
+
 @dataclass(frozen=True)
 class Position:
     symbol: str
@@ -60,6 +66,14 @@ class Strategy(Protocol):
 
 def strategy_request(strategy: Strategy, market: MarketSnapshot, account: AccountSnapshot, symbol: str, minute: str):
     return strategy.request(market, account, symbol, minute)
+
+
+def crossover_action(previous_trend, trend):
+    if previous_trend in (Trend.BELOW, Trend.EQUAL) and trend is Trend.ABOVE:
+        return Action.BUY
+    if previous_trend in (Trend.ABOVE, Trend.EQUAL) and trend is Trend.BELOW:
+        return Action.SELL
+    return Action.HOLD
 
 
 class TrendMomentumV1:
