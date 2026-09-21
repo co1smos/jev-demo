@@ -12,6 +12,7 @@ __pycache__/
 # Sandcastle runtime files
 .sandcastle/logs/
 .sandcastle/runs/
+.sandcastle/worktrees/
 .artifacts/
 node_modules/
 *.tsbuildinfo
