@@ -4,7 +4,7 @@ Use this workflow for implementing a ready GitHub issue with Codex.
 
 ## Natural-language invocation
 
-When the user asks Hermes to implement GitHub issues with Codex or Sandcastle, Hermes must load this document, compute the native dependency-ready frontier, apply the `AGENTS.md` model-routing rules, run the no-model preflight for each selected issue, and—if it passes—start each reviewed workflow in its own background Herdr tab. The user does not need to type the underlying npm or Herdr commands. Run up to three independent frontier tickets concurrently, but run fewer when only fewer are unblocked or their likely file ownership overlaps.
+When the user asks Hermes to implement GitHub issues with Codex or Sandcastle, the current Hermes tab remains the outer orchestrator. Hermes must load this document, compute the native dependency-ready frontier, apply the `AGENTS.md` model-routing rules, run the no-model preflight for each selected issue, and—if it passes—start each reviewed workflow in its own labeled background Herdr issue tab. The issue tab contains the deterministic Sandcastle controller; each implementer/reviewer Codex phase appears as a visible transient pane inside it. Do not start another Hermes agent per issue unless the user explicitly requests nested orchestration. Run up to three independent frontier tickets concurrently, but run fewer when only fewer are unblocked or their likely file ownership overlaps.
 
 Recommended prompt:
 
