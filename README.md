@@ -4,7 +4,16 @@ A planned educational simulator for testing whether TypeSafe AI JEV-directed sto
 
 The agreed v1 replays one-minute Alpaca data for AAPL, MSFT, and NVDA; persists JEV decisions and simulated fills; and compares JEV with a 20/60 moving-average baseline and buy-and-hold under the same costs and allocation limits.
 
-Status: research and design complete; implementation tickets are tracked in GitHub Issues.
+## Run locally
+
+Copy `.env.example` values into your environment, then run:
+
+```sh
+npm start
+```
+
+Open http://127.0.0.1:8000/. The page reports missing configuration by name
+without displaying its value.
 
 ## Documents
 
