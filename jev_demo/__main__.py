@@ -6,9 +6,10 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .decision import TypeSafeDecisionProvider
 from .historical_data import AlpacaHistoricalData
 from .run_store import RunStore
-from .simulation import SimulationRequest, run_buy_and_hold
+from .simulation import SimulationRequest, run_simulation
 
 
 def latest_historical_date():
@@ -38,7 +39,7 @@ class RunApplication:
         if not isinstance(request, dict) or set(request) != {"trading_date"}:
             raise ValueError("trading_date is required")
         date.fromisoformat(request["trading_date"])
-        request = {**request, "method": "buy_and_hold"}
+        request = {**request, "method": "jev"}
         run_id, created = self.store.create_once(request, idempotency_key)
         if created:
             self.store.progress(run_id, 0, 2)
@@ -55,7 +56,13 @@ class RunApplication:
                 )
                 snapshot = data.snapshot(request["trading_date"]).snapshot
                 self.store.progress(run_id, 1, 2)
-                run_buy_and_hold(SimulationRequest(request["trading_date"]), snapshot, self.store, run_id)
+                run_simulation(
+                    SimulationRequest(request["trading_date"], "jev"),
+                    snapshot,
+                    self.store,
+                    run_id=run_id,
+                    decision_provider=TypeSafeDecisionProvider(os.environ.get("TYPESAFE_API_KEY")),
+                )
             except Exception as error:
                 try:
                     self.store.fail(run_id, error)
