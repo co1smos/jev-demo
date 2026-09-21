@@ -114,9 +114,38 @@ class HttpRunTests(unittest.TestCase):
         self.assertIn('value="2026-09-18"', page)
         self.assertIn('id="run-status" role="status"', page)
         self.assertIn('id="completed-runs"', page)
+        self.assertIn('id="comparison-summary"', page)
+        self.assertIn('<caption>Method comparison</caption>', page)
+        self.assertIn('<details id="equity-data">', page)
         self.assertIn('"/api/runs"', page)
         self.assertNotIn('type="password"', page)
         self.assertNotIn("API key", page)
+
+    def test_comparison_endpoint_returns_all_persisted_methods(self):
+        ids = {}
+        for method in ("jev", "sma20_sma60", "buy_and_hold"):
+            run_id = self.store.create({"trading_date": "2026-09-18", "method": method})
+            self.store.complete(run_id, {
+                "method": method,
+                "source_digest": "a" * 64,
+                "starting_cash": "100000",
+                "allocation_cap": "0.10",
+                "ending_equity": "100010",
+                "fills": [],
+                "fees": [],
+                "equity_points": [{"timestamp": "09:30", "equity": "100010"}],
+                "execution_model_version": "execution-v1",
+                "fee_version": "fees-v1",
+            })
+            ids[method] = run_id
+
+        status, result = self.request(f"/api/runs/{ids['jev']}/comparison")
+
+        self.assertEqual(200, status)
+        self.assertEqual(
+            ["jev", "sma20_sma60", "buy_and_hold"],
+            [method["method"] for method in result["methods"]],
+        )
 
     def test_page_defaults_to_latest_completed_exchange_session(self):
         cases = (

@@ -277,6 +277,7 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
         "method": request.method,
         "source_digest": snapshot.digest,
         "starting_cash": _text(STARTING_CASH),
+        "allocation_cap": _text(POSITION_CAP),
         "ending_cash": _text(cash),
         "ending_equity": _text(cash),
         "net_pnl": _text(cash - STARTING_CASH),
