@@ -220,7 +220,7 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
         order_start = len(orders)
         fill_start = len(fills)
         position_start = len(position_events)
-        ledger_start = len(ledger)
+        ledger_start = 0 if index == 0 else len(ledger)
         submitted, actions = pending.pop(index, (None, {}))
         signal_equity = cash + sum(
             Decimal(str(bars[item].open)) * quantity for item, quantity in quantities.items()

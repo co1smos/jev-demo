@@ -236,6 +236,14 @@ class SimulationTests(unittest.TestCase):
             len([record for record in run["records"] if record["kind"].startswith("jev_decision")]),
         )
         self.assertEqual(12, len([record for record in run["records"] if record["kind"] == "action"]))
+        self.assertEqual(
+            Decimal(result["ending_cash"]),
+            sum(
+                Decimal(record["data"]["amount"])
+                for record in run["records"]
+                if record["kind"] == "ledger"
+            ),
+        )
 
     def test_concurrent_jev_workers_process_a_run_only_once(self):
         snapshot = self._jev_snapshot()
