@@ -18,6 +18,7 @@ class RunStore:
                 """
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY,
+                    idempotency_key TEXT,
                     request TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
                     progress_current INTEGER NOT NULL DEFAULT 0,
@@ -36,6 +37,12 @@ class RunStore:
                 );
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
+            if "idempotency_key" not in columns:
+                connection.execute("ALTER TABLE runs ADD COLUMN idempotency_key TEXT")
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS runs_idempotency_key ON runs(idempotency_key)"
+            )
 
     def _connect(self):
         connection = sqlite3.connect(self.path)
@@ -53,6 +60,32 @@ class RunStore:
                 (run_id, json.dumps(request), timestamp, timestamp),
             )
         return run_id
+
+    def create_once(self, request, idempotency_key):
+        if not idempotency_key:
+            return self.create(request), True
+        run_id = str(uuid.uuid4())
+        timestamp = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT id, request FROM runs WHERE idempotency_key = ?", (idempotency_key,)
+            ).fetchone()
+            if existing:
+                if json.loads(existing["request"]) != request:
+                    raise ValueError("idempotency key was already used for another request")
+                return existing["id"], False
+            connection.execute(
+                "INSERT INTO runs (id, idempotency_key, request, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'running', ?, ?)",
+                (run_id, idempotency_key, json.dumps(request), timestamp, timestamp),
+            )
+        return run_id, True
+
+    def fail_running(self, error):
+        for run in self.list():
+            if run["status"] == "running":
+                self.fail(run["id"], error)
 
     def append(self, run_id, kind, data=None):
         if isinstance(kind, str):

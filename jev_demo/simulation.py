@@ -29,18 +29,20 @@ def _fee(value):
     return value.quantize(CENT, rounding=ROUND_CEILING)
 
 
-def run_simulation(request, snapshot, store):
+def run_simulation(request, snapshot, store, run_id=None):
     """Run a supported method through the shared persisted simulation seam."""
     if not isinstance(request, SimulationRequest):
         raise ValueError("a SimulationRequest is required")
     if request.method == "buy_and_hold":
-        return run_buy_and_hold(request, snapshot, store)
+        return run_buy_and_hold(request, snapshot, store, run_id)
     if request.method == "sma20_sma60":
+        if run_id is not None:
+            raise ValueError("an existing run is only supported for buy_and_hold")
         return run_sma_crossover(request, snapshot, store)
     raise ValueError(f"unsupported simulation method: {request.method}")
 
 
-def run_buy_and_hold(request, snapshot, store):
+def run_buy_and_hold(request, snapshot, store, run_id=None):
     """Run and persist the v1 buy-and-hold benchmark."""
     if not isinstance(request, SimulationRequest) or request.method != "buy_and_hold":
         raise ValueError("a buy-and-hold SimulationRequest is required")
@@ -48,7 +50,7 @@ def run_buy_and_hold(request, snapshot, store):
     def decisions(index, _quantities):
         return {symbol: Action.BUY for symbol in snapshot.symbols} if index == 60 else {}
 
-    return _run(request, snapshot, store, decisions)
+    return _run(request, snapshot, store, decisions, run_id=run_id)
 
 
 def run_sma_crossover(request, snapshot, store):
@@ -85,7 +87,7 @@ def run_sma_crossover(request, snapshot, store):
     return _run(request, snapshot, store, decisions, recorded)
 
 
-def _run(request, snapshot, store, decide, decisions=None):
+def _run(request, snapshot, store, decide, decisions=None, run_id=None):
     if request.trading_date != snapshot.trading_date:
         raise ValueError("request and snapshot trading dates differ")
 
@@ -99,7 +101,7 @@ def _run(request, snapshot, store, decide, decisions=None):
     if len(minutes) < 62:
         raise ValueError("snapshot needs 60 warm-up minutes and later fill minutes")
 
-    run_id = store.create({**asdict(request), "source_digest": snapshot.digest})
+    run_id = run_id or store.create({**asdict(request), "source_digest": snapshot.digest})
     cash = STARTING_CASH
     quantities = {symbol: 0 for symbol in snapshot.symbols}
     costs = {symbol: Decimal("0") for symbol in snapshot.symbols}
@@ -191,6 +193,7 @@ def _run(request, snapshot, store, decide, decisions=None):
     ledger_cash = sum(Decimal(entry["amount"]) for entry in ledger)
     result = {
         "method": request.method,
+        "source_digest": snapshot.digest,
         "starting_cash": _text(STARTING_CASH),
         "ending_cash": _text(cash),
         "ending_equity": _text(cash),
@@ -216,5 +219,6 @@ def _run(request, snapshot, store, decide, decisions=None):
         *({"kind": "equity", "data": item} for item in equity_points),
         *({"kind": "ledger", "data": item} for item in ledger),
     ])
+    store.progress(run_id, 2, 2)
     store.complete(run_id, result)
     return store.read(run_id)
