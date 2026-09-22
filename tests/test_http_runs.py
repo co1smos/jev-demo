@@ -127,6 +127,39 @@ class HttpRunTests(unittest.TestCase):
         self.assertNotIn('type="password"', page)
         self.assertNotIn("API key", page)
 
+    def test_page_initially_shows_durable_parent_run_history_and_context(self):
+        completed = self.store.create({"trading_date": "2026-09-16", "method": "jev"})
+        self.store.complete(completed, {"method": "jev"})
+        failed = self.store.create({"trading_date": "2026-09-17", "method": "jev"})
+        self.store.fail(failed, "provider unavailable")
+        running = self.store.create({"trading_date": "2026-09-18", "method": "jev"})
+        self.store.progress(running, 1, 2)
+        internal = self.store.create({"trading_date": "2026-09-18", "method": "buy_and_hold"})
+        self.store.complete(internal, {})
+
+        with urlopen(self.base_url + "/", timeout=2) as response:
+            page = response.read().decode()
+
+        self.assertIn("Run history", page)
+        self.assertIn(f'href="/?run={completed}"', page)
+        self.assertIn("2026-09-16", page)
+        self.assertIn("2026-09-17", page)
+        self.assertIn("provider unavailable", page)
+        self.assertIn("2026-09-18", page)
+        self.assertIn("Progress: 1 of 2", page)
+        self.assertIn("Created", page)
+        self.assertIn("Updated", page)
+        self.assertNotIn(internal, page)
+
+    def test_empty_history_explains_the_separate_verification_database(self):
+        with urlopen(self.base_url + "/", timeout=2) as response:
+            page = response.read().decode()
+
+        self.assertIn(
+            "Verification evidence used a separate temporary database and was not imported",
+            page,
+        )
+
     def test_page_ignores_stale_selection_responses_and_retries_progress(self):
         with urlopen(self.base_url + "/", timeout=2) as response:
             page = response.read().decode()
@@ -184,6 +217,7 @@ class HttpRunTests(unittest.TestCase):
                 "ending_equity": "100010",
                 "fills": [],
                 "fees": [],
+                "positions": [],
                 "equity_points": [{"timestamp": "09:30", "equity": "100010"}],
                 "execution_model_version": "execution-v1",
                 "fee_version": "fees-v1",
@@ -191,12 +225,17 @@ class HttpRunTests(unittest.TestCase):
             ids[method] = run_id
 
         status, result = self.request(f"/api/runs/{ids['jev']}/comparison")
+        with urlopen(self.base_url + f"/?run={ids['jev']}", timeout=2) as response:
+            page = response.read().decode()
 
         self.assertEqual(200, status)
         self.assertEqual(
             ["jev", "sma20_sma60", "buy_and_hold"],
             [method["method"] for method in result["methods"]],
         )
+        self.assertIn(f'data-run-id="{ids["jev"]}"', page)
+        self.assertIn("<td>jev</td>", page)
+        self.assertIn("if(summary.dataset.runId)selectRun(summary.dataset.runId)", page)
 
     def test_page_defaults_to_latest_completed_exchange_session(self):
         cases = (
@@ -242,6 +281,30 @@ class HttpRunTests(unittest.TestCase):
         _, failed = self.request(f"/api/runs/{interrupted}/result")
         self.assertEqual("failed", failed["status"])
         self.assertEqual("web process restarted before the run completed", failed["error"])
+
+    def test_history_survives_store_application_and_http_server_restart(self):
+        path = Path(self.directory.name) / "restart.db"
+        store = RunStore(path)
+        run_id = store.create({"trading_date": "2026-09-15", "method": "jev"})
+        store.complete(run_id, {"method": "jev"})
+
+        def page_after_restart():
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                handler_for(RunApplication(RunStore(path), lambda *_: None), self.latest_date),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=2) as response:
+                    return response.read().decode()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
+        self.assertIn(f'href="/?run={run_id}"', page_after_restart())
+        self.assertIn(f'href="/?run={run_id}"', page_after_restart())
 
 
 if __name__ == "__main__":
