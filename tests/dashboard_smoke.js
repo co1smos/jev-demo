@@ -30,6 +30,12 @@
     assert(!document.querySelector('#audit details').open,'collapsed raw audit');
     assert(document.querySelector('#comparison-body').textContent.includes('jev'),'comparison retained');
     const data=await (await fetch(`/api/runs/${selectedRun}/visualization`)).json();
+    assert(data.decisions.every(d=>d.input.relative_volume===1),'constant positive volume fixture');
+    const volume=document.querySelector('#decision-charts svg[aria-label*="Relative volume"]');
+    const volumeBars=[...volume.querySelectorAll('line')].filter(n=>!n.classList.contains('crosshair') && n.getAttribute('x1')===n.getAttribute('x2'));
+    assert(volumeBars.length===data.decisions.filter(d=>d.symbol==='NVDA').length,'relative volume bars');
+    assert(volumeBars.every(n=>n.getBoundingClientRect().height>0),'constant positive relative volume bars must be visible');
+    assert([...volume.querySelectorAll('text')].some(n=>Number(n.textContent)===0),'relative volume scale starts at zero');
     data.decisions=data.decisions.map(d=>({...d,action:'HOLD'}));
     for(const id of ['decision-overview','symbol-buttons','decision-charts'])document.getElementById(id).replaceChildren();
     renderVisualization(data);

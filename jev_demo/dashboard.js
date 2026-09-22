@@ -102,6 +102,7 @@ function renderVisualization(data) {
       const legend=document.createElement('p');legend.className='chart-legend';
       const svg=svgNode('svg',{viewBox:'0 0 400 160',tabindex:0,role:'group','aria-label':`${symbol} ${title}; arrow keys inspect minutes`, 'data-domain':`${times[0]}/${times.at(-1)}`});
       const values=series.flatMap(s=>s.points.filter(p=>number(p.value)).map(p=>Number(p.value)));
+      if(series.some(s=>s.bars))values.push(0);
       if(reference!==null)values.push(reference);
       if(price) values.push(...fills.map(f=>Number(f.price)));
       let low=fixed?fixed[0]:Math.min(...values), high=fixed?fixed[1]:Math.max(...values);
@@ -115,7 +116,7 @@ function renderVisualization(data) {
         let path='',connected=false;
         for(const p of s.points) {
           if(!number(p.value)){connected=false;continue;}
-          if(s.bars)svg.append(svgNode('line',{x1:x(p.time),x2:x(p.time),y1:130,y2:y(p.value),stroke:s.color,'stroke-width':1}));
+          if(s.bars)svg.append(svgNode('line',{x1:x(p.time),x2:x(p.time),y1:y(0),y2:y(p.value),stroke:s.color,'stroke-width':1}));
           else {path+=`${connected?'L':'M'}${x(p.time)},${y(p.value)} `;connected=true;}
         }
         if(!s.bars)svg.append(svgNode('path',{d:path,fill:'none',stroke:s.color,'stroke-width':2,'stroke-dasharray':probability?['','7 3','3 2','1 3'][index]:'' ,'aria-label':s.name}));
