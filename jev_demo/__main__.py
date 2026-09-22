@@ -3,6 +3,7 @@ import os
 import re
 import threading
 from datetime import date
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -32,6 +33,29 @@ def configuration():
     }
 
 
+def execute_run(store, run_id, trading_date, data, decision_provider):
+    snapshot_result = data.snapshot(trading_date)
+    snapshot = snapshot_result.snapshot
+    store.append(run_id, "market_snapshot", {
+        "source_digest": snapshot.digest,
+        "reused": snapshot_result.reused,
+    })
+    store.progress(run_id, 1, 2)
+    run_simulation(
+        SimulationRequest(trading_date, "sma20_sma60", run_id), snapshot, store
+    )
+    run_simulation(
+        SimulationRequest(trading_date, "buy_and_hold", run_id), snapshot, store
+    )
+    return run_simulation(
+        SimulationRequest(trading_date, "jev", run_id),
+        snapshot,
+        store,
+        run_id=run_id,
+        decision_provider=decision_provider,
+    )
+
+
 class RunApplication:
     def __init__(self, store, submit=None):
         self.store = store
@@ -57,24 +81,12 @@ class RunApplication:
                     os.environ.get("ALPACA_API_SECRET"),
                     Path(os.environ.get("JEV_DEMO_CACHE", ".jev-demo-cache")),
                 )
-                snapshot = data.snapshot(request["trading_date"]).snapshot
-                self.store.progress(run_id, 1, 2)
-                run_simulation(
-                    SimulationRequest(request["trading_date"], "sma20_sma60", run_id),
-                    snapshot,
+                execute_run(
                     self.store,
-                )
-                run_simulation(
-                    SimulationRequest(request["trading_date"], "buy_and_hold", run_id),
-                    snapshot,
-                    self.store,
-                )
-                run_simulation(
-                    SimulationRequest(request["trading_date"], "jev", run_id),
-                    snapshot,
-                    self.store,
-                    run_id=run_id,
-                    decision_provider=TypeSafeDecisionProvider(os.environ.get("TYPESAFE_API_KEY")),
+                    run_id,
+                    request["trading_date"],
+                    data,
+                    TypeSafeDecisionProvider(os.environ.get("TYPESAFE_API_KEY")),
                 )
             except Exception as error:
                 try:
@@ -170,6 +182,24 @@ def handler_for(application, latest_date=latest_historical_date):
                     default_date = latest_date()
                 except ValueError:
                     default_date = ""
+                selected_id = parse_qs(url.query).get("run", [None])[-1]
+                selected_date = ""
+                comparison_rows = ""
+                if selected_id:
+                    try:
+                        selected = application.store.read(selected_id)
+                        result = comparison(application.store, selected_id)
+                        selected_date = selected["request"]["trading_date"]
+                        comparison_rows = "".join(
+                            "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in (
+                                method["method"], method["net_profit"], method["return"],
+                                method["maximum_drawdown_return"], method["trade_count"],
+                                method["total_costs"], method["difference_from_buy_and_hold"]["net_profit"],
+                            )) + "</tr>"
+                            for method in result["methods"]
+                        )
+                    except (KeyError, ValueError):
+                        selected_id = None
                 body = f'''<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -200,7 +230,7 @@ svg{{width:100%;height:12rem;border:1px solid #ccc}}
   <h2>Completed runs</h2>
   <p id="runs-status" role="status" aria-live="polite"></p>
   <ul id="completed-runs"><li>Loading…</li></ul>
-  <p id="result-status" role="status" aria-live="polite">Select a completed run to inspect it.</p>
+  <p id="result-status" role="status" aria-live="polite">{f"Showing completed run for {selected_date}." if selected_id else "Select a completed run to inspect it."}</p>
   <section id="audit" aria-busy="false" hidden>
     <h2>JEV decision audit</h2>
     <form id="audit-filters">
@@ -212,9 +242,9 @@ svg{{width:100%;height:12rem;border:1px solid #ccc}}
     <p id="audit-count" role="status"></p>
     <table><thead><tr><th>Minute / stock</th><th>Decision evidence</th><th>Explanation / execution</th></tr></thead><tbody id="audit-rows"></tbody></table>
   </section>
-  <section id="comparison-summary" aria-busy="false" hidden>
+  <section id="comparison-summary" aria-busy="false"{f' data-run-id="{escape(selected_id)}" data-trading-date="{escape(selected_date)}"' if selected_id else ''}{'' if selected_id else ' hidden'}>
     <h2>Method comparison</h2>
-    <table><caption>Method comparison</caption><thead><tr><th>Method</th><th>Net profit</th><th>Return</th><th>Max drawdown</th><th>Trades</th><th>Total costs</th><th>vs buy-and-hold</th></tr></thead><tbody id="comparison-body"></tbody></table>
+    <table><caption>Method comparison</caption><thead><tr><th>Method</th><th>Net profit</th><th>Return</th><th>Max drawdown</th><th>Trades</th><th>Total costs</th><th>vs buy-and-hold</th></tr></thead><tbody id="comparison-body">{comparison_rows}</tbody></table>
     <h3>Equity curve</h3>
     <p id="equity-summary"></p>
     <svg id="equity-chart" viewBox="0 0 600 200" aria-hidden="true"></svg>
