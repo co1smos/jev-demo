@@ -1,0 +1,142 @@
+{
+  "captured_at": "2026-09-22T00:11:00.516003+00:00",
+  "checks": {
+    "csv_exported": true,
+    "dashboard_rendered": true,
+    "distinct_immutable_runs": true,
+    "first_run_fetched_source": true,
+    "pinned_jev_model_returned": true,
+    "second_run_reused_source": true,
+    "source_digest_matches": true,
+    "three_methods_persisted": true
+  },
+  "date": "2026-09-18",
+  "execution_version": "next_minute_open_2bps_v1",
+  "fee_version": "us_equity_2026_v1",
+  "requested_jev_model": "jev-1.13.0",
+  "returned_jev_model": "jev-1.13.0",
+  "runs": [
+    {
+      "final_metrics": [
+        {
+          "difference_from_buy_and_hold": {
+            "net_profit": "-102.05229106",
+            "return": "-0.0010205229106"
+          },
+          "maximum_drawdown": "68.37207500",
+          "maximum_drawdown_return": "0.0006834473453099901010863244553",
+          "method": "jev",
+          "net_profit": "117.49082094",
+          "per_stock_contribution": {
+            "AAPL": "31.04546744",
+            "MSFT": "25.095880",
+            "NVDA": "63.44947350"
+          },
+          "return": "0.0011749082094",
+          "total_costs": "41.38287906",
+          "trade_count": 20
+        },
+        {
+          "difference_from_buy_and_hold": {
+            "net_profit": "-90.53988616",
+            "return": "-0.0009053988616"
+          },
+          "maximum_drawdown": "66.92178500",
+          "maximum_drawdown_return": "0.0006688901870727633538113432851",
+          "method": "sma20_sma60",
+          "net_profit": "129.00322584",
+          "per_stock_contribution": {
+            "AAPL": "33.36558344",
+            "MSFT": "25.095880",
+            "NVDA": "72.43176240"
+          },
+          "return": "0.0012900322584",
+          "total_costs": "37.22597416",
+          "trade_count": 18
+        },
+        {
+          "difference_from_buy_and_hold": {
+            "net_profit": "0.00000000",
+            "return": "0.00000000000"
+          },
+          "maximum_drawdown": "71.23000000",
+          "maximum_drawdown_return": "0.0007114180211658636099060811470",
+          "method": "buy_and_hold",
+          "net_profit": "219.54311200",
+          "per_stock_contribution": {
+            "AAPL": "82.90990500",
+            "MSFT": "29.058440",
+            "NVDA": "108.2147670"
+          },
+          "return": "0.00219543112",
+          "total_costs": "12.56688800",
+          "trade_count": 6
+        }
+      ],
+      "run_id": "23ae0ffb-0898-4a1f-8bf7-32c299cecb10",
+      "source_reused": false
+    },
+    {
+      "final_metrics": [
+        {
+          "difference_from_buy_and_hold": {
+            "net_profit": "-102.05229106",
+            "return": "-0.0010205229106"
+          },
+          "maximum_drawdown": "68.37207500",
+          "maximum_drawdown_return": "0.0006834473453099901010863244553",
+          "method": "jev",
+          "net_profit": "117.49082094",
+          "per_stock_contribution": {
+            "AAPL": "31.04546744",
+            "MSFT": "25.095880",
+            "NVDA": "63.44947350"
+          },
+          "return": "0.0011749082094",
+          "total_costs": "41.38287906",
+          "trade_count": 20
+        },
+        {
+          "difference_from_buy_and_hold": {
+            "net_profit": "-90.53988616",
+            "return": "-0.0009053988616"
+          },
+          "maximum_drawdown": "66.92178500",
+          "maximum_drawdown_return": "0.0006688901870727633538113432851",
+          "method": "sma20_sma60",
+          "net_profit": "129.00322584",
+          "per_stock_contribution": {
+            "AAPL": "33.36558344",
+            "MSFT": "25.095880",
+            "NVDA": "72.43176240"
+          },
+          "return": "0.0012900322584",
+          "total_costs": "37.22597416",
+          "trade_count": 18
+        },
+        {
+          "difference_from_buy_and_hold": {
+            "net_profit": "0.00000000",
+            "return": "0.00000000000"
+          },
+          "maximum_drawdown": "71.23000000",
+          "maximum_drawdown_return": "0.0007114180211658636099060811470",
+          "method": "buy_and_hold",
+          "net_profit": "219.54311200",
+          "per_stock_contribution": {
+            "AAPL": "82.90990500",
+            "MSFT": "29.058440",
+            "NVDA": "108.2147670"
+          },
+          "return": "0.00219543112",
+          "total_costs": "12.56688800",
+          "trade_count": 6
+        }
+      ],
+      "run_id": "487e6aa3-2899-44c4-b272-c7224163446e",
+      "source_reused": true
+    }
+  ],
+  "source_digest": "1de303adf34528feda3ab40fe1b311efcc5f82f36809e80db5bf8287e92076c7",
+  "strategy_version": "trend_momentum_v1"
+}

@@ -32,6 +32,29 @@ def configuration():
     }
 
 
+def execute_run(store, run_id, trading_date, data, decision_provider):
+    snapshot_result = data.snapshot(trading_date)
+    snapshot = snapshot_result.snapshot
+    store.append(run_id, "market_snapshot", {
+        "source_digest": snapshot.digest,
+        "reused": snapshot_result.reused,
+    })
+    store.progress(run_id, 1, 2)
+    run_simulation(
+        SimulationRequest(trading_date, "sma20_sma60", run_id), snapshot, store
+    )
+    run_simulation(
+        SimulationRequest(trading_date, "buy_and_hold", run_id), snapshot, store
+    )
+    return run_simulation(
+        SimulationRequest(trading_date, "jev", run_id),
+        snapshot,
+        store,
+        run_id=run_id,
+        decision_provider=decision_provider,
+    )
+
+
 class RunApplication:
     def __init__(self, store, submit=None):
         self.store = store
@@ -57,24 +80,12 @@ class RunApplication:
                     os.environ.get("ALPACA_API_SECRET"),
                     Path(os.environ.get("JEV_DEMO_CACHE", ".jev-demo-cache")),
                 )
-                snapshot = data.snapshot(request["trading_date"]).snapshot
-                self.store.progress(run_id, 1, 2)
-                run_simulation(
-                    SimulationRequest(request["trading_date"], "sma20_sma60", run_id),
-                    snapshot,
+                execute_run(
                     self.store,
-                )
-                run_simulation(
-                    SimulationRequest(request["trading_date"], "buy_and_hold", run_id),
-                    snapshot,
-                    self.store,
-                )
-                run_simulation(
-                    SimulationRequest(request["trading_date"], "jev", run_id),
-                    snapshot,
-                    self.store,
-                    run_id=run_id,
-                    decision_provider=TypeSafeDecisionProvider(os.environ.get("TYPESAFE_API_KEY")),
+                    run_id,
+                    request["trading_date"],
+                    data,
+                    TypeSafeDecisionProvider(os.environ.get("TYPESAFE_API_KEY")),
                 )
             except Exception as error:
                 try:
