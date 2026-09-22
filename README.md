@@ -69,12 +69,20 @@ Selecting a completed run shows:
 - net profit, return, maximum drawdown, trade count, and total costs for all
   three methods;
 - differences from buy-and-hold and per-stock contribution;
+- a non-HOLD decision overview and one-symbol synchronized historical price,
+  probability, SMA-spread, momentum, and relative-volume charts;
 - equity curves plus exact tabular equity values;
 - JEV fills, fees, final positions, and realized P&L;
 - a minute-by-minute JEV audit trail with input features, probabilities,
   requested/returned model versions, decisions, explanations, orders, and fills.
 
-Filter the audit trail by stock, action, or minute. Select **Download CSV** to
+Hover over a chart or focus it and use arrow keys to inspect a minute. Click a
+marker or press Enter to pin; Escape or **Unpin minute** releases it. Times are
+UTC. Decision reference prices use only bars strictly before the decision;
+fills show separate persisted execution evidence. Missing or invalid exact
+cache snapshots produce a local visualization error without fetching data.
+
+Expand **Show raw decision log** to filter the audit trail by stock, action, or minute. Select **Download CSV** to
 export the currently selected run's audit records.
 
 ## Runtime files and options
@@ -125,3 +133,15 @@ This project is educational historical paper trading. All results are
 hypothetical. It does not place real orders, provide investment advice,
 demonstrate future profitability, or guarantee that a strategy will perform
 similarly in live markets.
+
+### Visualization regression checks
+
+`python3 -m unittest discover -s tests -p test_visualization.py -v` exercises a
+complete three-symbol session with many HOLDs, BUY/SELL, low-margin probabilities,
+ABSTAIN, linked fills, and forced liquidation. It checks snapshot integrity,
+no-look-ahead references, HTTP, unchanged comparison metrics, and CSV evidence.
+The rendered smoke test uses an installed Playwright Chromium headless shell
+under `~/.cache/ms-playwright/`; it skips explicitly if that browser is absent.
+It runs at exactly 375 CSS pixels and checks overflow, synchronized domains,
+marker selection, keyboard pinning, empty/HOLD-only data, and local errors.
+No browser library or runtime dependency is added.

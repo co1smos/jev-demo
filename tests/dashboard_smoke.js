@@ -1,0 +1,67 @@
+(async()=>{
+  const assert=(value,message)=>{if(!value)throw Error(message)};
+  try {
+    while(!document.querySelector('#decision-charts svg')) await new Promise(r=>setTimeout(r,50));
+    const root=document.querySelector('#visualization');
+    assert(innerWidth===375,'viewport must be 375, got '+innerWidth);
+    assert(document.documentElement.scrollWidth<=innerWidth,'mobile page overflow');
+    assert(document.querySelectorAll('#decision-overview svg').length===3,'symbols');
+    assert(document.querySelectorAll('#decision-charts svg').length===5,'one symbol stack');
+    assert(new Set([...document.querySelectorAll('#decision-charts svg')].map(s=>s.dataset.domain)).size===1,'aligned domain');
+    const buy=document.querySelector('#decision-overview [aria-label="AAPL BUY 2026-09-18T14:30:00Z"]');
+    assert(buy,'known BUY');buy.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+    const detail=document.querySelector('#minute-detail');
+    assert(detail.textContent.includes('14:29:00Z') && detail.textContent.includes('$106.4'),'previous reference');
+    assert(detail.textContent.includes('14:31:00Z') && detail.textContent.includes('$106.12122'),'persisted fill');
+    assert(detail.textContent.includes('BUY: 0.5') && detail.textContent.includes('HOLD: 0.48'),'low margin probabilities');
+    assert(new Set([...document.querySelectorAll('.crosshair')].map(n=>n.getAttribute('x1'))).size===1,'shared crosshair');
+    assert(!document.querySelector('#decision-overview [aria-label*=" HOLD "]'),'no HOLD markers');
+    const sell=document.querySelector('#decision-overview [aria-label="AAPL SELL 2026-09-18T14:35:00Z"]');
+    assert(sell,'known SELL');sell.focus();sell.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+    assert(detail.textContent.includes('14:35:00Z') && detail.textContent.includes('pinned'),'keyboard pin');
+    for(const region of ['decision-overview','decision-charts']) for(const marker of document.querySelectorAll(`#${region} [role=button]`)) {
+      marker.focus();
+      marker.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+      assert(detail.textContent.includes('pinned'),'focused marker pins');
+      const pinnedDetail=detail.textContent;
+      const hoverChart=document.querySelector('#decision-charts svg');
+      const rect=hoverChart.getBoundingClientRect();
+      const hover=()=>hoverChart.dispatchEvent(new PointerEvent('pointermove',{clientX:rect.left+rect.width,bubbles:true}));
+      hover();
+      assert(detail.textContent===pinnedDetail,'pin prevents hover changes');
+      marker.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      assert(!detail.textContent.includes('pinned'),'Escape releases focused marker: '+marker.getAttribute('aria-label'));
+      hover();
+      assert(detail.textContent.startsWith('2026-09-18T19:59:00Z'),'hover resumes after Escape');
+    }
+    sell.focus();sell.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+    document.querySelectorAll('#symbol-buttons button')[1].click();
+    assert(document.querySelector('#decision-charts [aria-label*=forced_close]'),'forced close marker');
+    assert(document.querySelector('#decision-overview [aria-label*=ABSTAIN]'),'abstain marker');
+    document.querySelectorAll('#symbol-buttons button')[2].click();
+    assert(detail.textContent.includes('NVDA') && !detail.textContent.includes('Execution/fill:'),'no fills symbol');
+    const chart=document.querySelector('#decision-charts svg');chart.focus();
+    chart.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+    assert(detail.textContent.includes('14:36:00Z'),'keyboard minute');
+    assert(!document.querySelector('#audit details').open,'collapsed raw audit');
+    assert(document.querySelector('#comparison-body').textContent.includes('jev'),'comparison retained');
+    const data=await (await fetch(`/api/runs/${selectedRun}/visualization`)).json();
+    assert(data.decisions.every(d=>d.input.relative_volume===1),'constant positive volume fixture');
+    const volume=document.querySelector('#decision-charts svg[aria-label*="Relative volume"]');
+    const volumeBars=[...volume.querySelectorAll('line')].filter(n=>!n.classList.contains('crosshair') && n.getAttribute('x1')===n.getAttribute('x2'));
+    assert(volumeBars.length===data.decisions.filter(d=>d.symbol==='NVDA').length,'relative volume bars');
+    assert(volumeBars.every(n=>n.getBoundingClientRect().height>0),'constant positive relative volume bars must be visible');
+    assert([...volume.querySelectorAll('text')].some(n=>Number(n.textContent)===0),'relative volume scale starts at zero');
+    data.decisions=data.decisions.map(d=>({...d,action:'HOLD'}));
+    for(const id of ['decision-overview','symbol-buttons','decision-charts'])document.getElementById(id).replaceChildren();
+    renderVisualization(data);
+    assert(document.querySelectorAll('#decision-charts svg').length===5,'HOLD-only charts');
+    assert(!document.querySelector('#decision-overview [role=button]'),'empty overview');
+    const csv=await fetch(`/api/runs/${selectedRun}/audit.csv`);
+    assert(csv.ok && (await csv.text()).includes('buy_probability'),'CSV');
+    await loadVisualization('missing-run');
+    assert(document.querySelector('#visual-status').textContent.includes('Visualization unavailable'),'local error');
+    assert(document.querySelector('#comparison-body').textContent.includes('jev'),'comparison survives error');
+    root.dataset.smoke='passed';
+  } catch(error) {document.body.dataset.smoke='failed: '+error.message;}
+})();

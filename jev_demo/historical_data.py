@@ -103,7 +103,7 @@ class AlpacaHistoricalData:
 
         cache_path = self.cache_directory / f"{trading_date}-{'-'.join(symbols)}-{self.source.feed}.json"
         if cache_path.is_file():
-            return SnapshotResult(self._read_cache(cache_path, trading_date, symbols), True)
+            return SnapshotResult(self.read_cache(cache_path, trading_date, symbols, self.source, self.now()), True)
 
         calendar = self._json(
             "https://api.alpaca.markets/v2/calendar?" + urlencode({"start": trading_date, "end": trading_date})
@@ -183,7 +183,8 @@ class AlpacaHistoricalData:
             raise HistoricalDataError("malformed Alpaca bar") from error
         return tuple(sorted(result, key=lambda bar: (bar.timestamp, bar.symbol)))
 
-    def _validate_complete(self, bars, symbols, session_open, session_close):
+    @staticmethod
+    def _validate_complete(bars, symbols, session_open, session_close):
         expected_times = []
         minute = session_open.astimezone(timezone.utc)
         while minute < session_close.astimezone(timezone.utc):
@@ -198,7 +199,9 @@ class AlpacaHistoricalData:
             extra = len(actual - expected)
             raise HistoricalDataError(f"incomplete regular-session bars: {missing} missing, {extra} unexpected")
 
-    def _read_cache(self, path, trading_date, symbols):
+    @classmethod
+    def read_cache(cls, path, trading_date, symbols, source=None, now=None):
+        """Validate a local snapshot without credentials or a network fallback."""
         try:
             payload = json.loads(path.read_text())
             digest = payload.pop("digest")
@@ -206,29 +209,30 @@ class AlpacaHistoricalData:
             if digest != actual:
                 raise HistoricalDataError("cached snapshot digest mismatch")
             payload["digest"] = digest
-            snapshot = self._snapshot(payload)
+            snapshot = cls._snapshot(payload)
             if (snapshot.trading_date != trading_date or snapshot.symbols != symbols
-                    or snapshot.source != self.source):
+                    or (source is not None and snapshot.source != source)):
                 raise HistoricalDataError("cached snapshot metadata mismatch")
-            session_open = datetime.fromisoformat(self._timestamp(payload["session_open"]).replace("Z", "+00:00"))
-            session_close = datetime.fromisoformat(self._timestamp(payload["session_close"]).replace("Z", "+00:00"))
-            if self.now().astimezone(timezone.utc) < session_close:
+            session_open = datetime.fromisoformat(cls._timestamp(payload["session_open"]).replace("Z", "+00:00"))
+            session_close = datetime.fromisoformat(cls._timestamp(payload["session_close"]).replace("Z", "+00:00"))
+            if (now or datetime.now(timezone.utc)).astimezone(timezone.utc) < session_close:
                 raise HistoricalDataError(f"{trading_date} is not complete")
-            self._validate_bars(snapshot.bars)
-            self._validate_complete(snapshot.bars, symbols, session_open, session_close)
+            cls._validate_bars(snapshot.bars)
+            cls._validate_complete(snapshot.bars, symbols, session_open, session_close)
             return snapshot
         except HistoricalDataError:
             raise
-        except (OSError, KeyError, TypeError, ValueError) as error:
+        except (OSError, AttributeError, KeyError, TypeError, ValueError) as error:
             raise HistoricalDataError("malformed cached snapshot") from error
 
-    def _validate_bars(self, bars):
+    @classmethod
+    def _validate_bars(cls, bars):
         if tuple(sorted(bars, key=lambda bar: (bar.timestamp, bar.symbol))) != bars:
             raise HistoricalDataError("snapshot bars are not ordered")
         try:
             for bar in bars:
                 prices = bar.open, bar.high, bar.low, bar.close
-                if (self._timestamp(bar.timestamp) != bar.timestamp
+                if (cls._timestamp(bar.timestamp) != bar.timestamp
                         or any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in prices)
                         or isinstance(bar.volume, bool) or not isinstance(bar.volume, int)
                         or not all(math.isfinite(value) and value > 0 for value in prices)
@@ -240,7 +244,8 @@ class AlpacaHistoricalData:
         except (TypeError, ValueError, OverflowError) as error:
             raise HistoricalDataError("malformed snapshot bar") from error
 
-    def _snapshot(self, payload):
+    @staticmethod
+    def _snapshot(payload):
         try:
             return MarketSnapshot(
                 payload["trading_date"], tuple(payload["symbols"]),
