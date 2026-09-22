@@ -1,0 +1,45 @@
+(async()=>{
+  const assert=(value,message)=>{if(!value)throw Error(message)};
+  try {
+    while(!document.querySelector('#decision-charts svg')) await new Promise(r=>setTimeout(r,50));
+    const root=document.querySelector('#visualization');
+    assert(innerWidth===375,'viewport must be 375, got '+innerWidth);
+    assert(document.documentElement.scrollWidth<=innerWidth,'mobile page overflow');
+    assert(document.querySelectorAll('#decision-overview svg').length===3,'symbols');
+    assert(document.querySelectorAll('#decision-charts svg').length===5,'one symbol stack');
+    assert(new Set([...document.querySelectorAll('#decision-charts svg')].map(s=>s.dataset.domain)).size===1,'aligned domain');
+    const buy=document.querySelector('#decision-overview [aria-label="AAPL BUY 2026-09-18T14:30:00Z"]');
+    assert(buy,'known BUY');buy.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+    const detail=document.querySelector('#minute-detail');
+    assert(detail.textContent.includes('14:29:00Z') && detail.textContent.includes('$106.4'),'previous reference');
+    assert(detail.textContent.includes('14:31:00Z') && detail.textContent.includes('$106.12122'),'persisted fill');
+    assert(detail.textContent.includes('BUY: 0.5') && detail.textContent.includes('HOLD: 0.48'),'low margin probabilities');
+    assert(new Set([...document.querySelectorAll('.crosshair')].map(n=>n.getAttribute('x1'))).size===1,'shared crosshair');
+    assert(!document.querySelector('#decision-overview [aria-label*=" HOLD "]'),'no HOLD markers');
+    const sell=document.querySelector('#decision-overview [aria-label="AAPL SELL 2026-09-18T14:35:00Z"]');
+    assert(sell,'known SELL');sell.focus();sell.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+    assert(detail.textContent.includes('14:35:00Z') && detail.textContent.includes('pinned'),'keyboard pin');
+    document.querySelectorAll('#symbol-buttons button')[1].click();
+    assert(document.querySelector('#decision-charts [aria-label*=forced_close]'),'forced close marker');
+    assert(document.querySelector('#decision-overview [aria-label*=ABSTAIN]'),'abstain marker');
+    document.querySelectorAll('#symbol-buttons button')[2].click();
+    assert(detail.textContent.includes('NVDA') && !detail.textContent.includes('Execution/fill:'),'no fills symbol');
+    const chart=document.querySelector('#decision-charts svg');chart.focus();
+    chart.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+    assert(detail.textContent.includes('14:36:00Z'),'keyboard minute');
+    assert(!document.querySelector('#audit details').open,'collapsed raw audit');
+    assert(document.querySelector('#comparison-body').textContent.includes('jev'),'comparison retained');
+    const data=await (await fetch(`/api/runs/${selectedRun}/visualization`)).json();
+    data.decisions=data.decisions.map(d=>({...d,action:'HOLD'}));
+    for(const id of ['decision-overview','symbol-buttons','decision-charts'])document.getElementById(id).replaceChildren();
+    renderVisualization(data);
+    assert(document.querySelectorAll('#decision-charts svg').length===5,'HOLD-only charts');
+    assert(!document.querySelector('#decision-overview [role=button]'),'empty overview');
+    const csv=await fetch(`/api/runs/${selectedRun}/audit.csv`);
+    assert(csv.ok && (await csv.text()).includes('buy_probability'),'CSV');
+    await loadVisualization('missing-run');
+    assert(document.querySelector('#visual-status').textContent.includes('Visualization unavailable'),'local error');
+    assert(document.querySelector('#comparison-body').textContent.includes('jev'),'comparison survives error');
+    root.dataset.smoke='passed';
+  } catch(error) {document.body.dataset.smoke='failed: '+error.message;}
+})();

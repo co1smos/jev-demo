@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 from .audit import audit_csv, read_audit
 from .decision import MODEL, QUESTION_VERSION, TypeSafeDecisionProvider
 from .historical_data import SYMBOLS, AlpacaHistoricalData
-from .read_model import comparison
+from .read_model import comparison, visualization
 from .run_store import RunStore
 from .simulation import (
     EXECUTION_MODEL_VERSION,
@@ -163,6 +163,24 @@ def handler_for(application, latest_date=latest_historical_date):
             if path == "/api/runs":
                 self._json(200, application.store.list())
                 return
+            if path == "/dashboard.js":
+                body = Path(__file__).with_name("dashboard.js").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            visual_match = re.fullmatch(r"/api/runs/([^/]+)/visualization", path)
+            if visual_match:
+                try:
+                    self._json(200, visualization(application.store, visual_match.group(1),
+                               os.environ.get("JEV_DEMO_CACHE", ".jev-demo-cache")))
+                except KeyError:
+                    self._json(404, {"error": "run or visualization data not found"})
+                except ValueError as error:
+                    self._json(409, {"error": str(error)})
+                return
             audit_match = re.fullmatch(r"/api/runs/([^/]+)/audit(\.csv)?", path)
             if audit_match:
                 filters = {key: values[-1] for key, values in parse_qs(url.query).items()
@@ -200,8 +218,9 @@ def handler_for(application, latest_date=latest_historical_date):
                 return
             if path == "/":
                 status = "Ready" if "missing" not in config.values() else "Configuration required"
+                selected_id = parse_qs(url.query).get("run", [None])[-1]
                 try:
-                    default_date = latest_date()
+                    default_date = "" if selected_id else latest_date()
                 except ValueError:
                     default_date = ""
                 selected_id = parse_qs(url.query).get("run", [None])[-1]
@@ -220,6 +239,7 @@ def handler_for(application, latest_date=latest_historical_date):
                         selected = application.store.read(selected_id)
                         result = comparison(application.store, selected_id)
                         selected_date = selected["request"]["trading_date"]
+                        default_date = selected_date
                         comparison_rows = "".join(
                             "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in (
                                 method["method"], method["net_profit"], method["return"],
@@ -245,6 +265,9 @@ table{{border-collapse:collapse;width:100%;display:block;overflow:auto}}th,td{{b
 #comparison-summary th,#comparison-summary td{{text-align:right}}#comparison-summary th:first-child,#comparison-summary td:first-child{{text-align:left}}
 pre{{white-space:pre-wrap;margin:0}}
 svg{{width:100%;height:12rem;border:1px solid #ccc}}
+*{{box-sizing:border-box}}body{{overflow-wrap:anywhere}}input,select{{max-width:100%;min-width:0}}form>div{{min-width:0;max-width:100%}}
+#visualization svg{{display:block;height:auto;overflow:visible}}#visualization svg:focus-visible{{outline:3px solid #165dff}}#visualization button{{margin:.2rem}}
+#minute-detail{{white-space:pre-wrap;padding:.5rem;border:1px solid #ccc}}.chart-legend{{margin:.3rem 0;font-size:.9rem}}
 </style>
 <h1>JEV Simulator</h1>
 <p class="notice"><strong>Historical paper trading only.</strong> No live orders or financial advice.</p>
@@ -261,21 +284,21 @@ svg{{width:100%;height:12rem;border:1px solid #ccc}}
   <p id="runs-status" role="status" aria-live="polite"></p>
   <ul id="completed-runs">{history_items}</ul>
   <p id="result-status" role="status" aria-live="polite">{f"Showing completed run for {selected_date}." if selected_id else "Select a completed run to inspect it."}</p>
-  <section id="audit" aria-busy="false" hidden>
-    <h2>JEV decision audit</h2>
-    <form id="audit-filters">
-      <div><label for="audit-symbol">Stock</label><select id="audit-symbol" name="symbol"><option value="">All</option><option>AAPL</option><option>MSFT</option><option>NVDA</option></select></div>
-      <div><label for="audit-action">Action</label><select id="audit-action" name="action"><option value="">All</option><option>BUY</option><option>HOLD</option><option>SELL</option><option>ABSTAIN</option></select></div>
-      <div><label for="audit-minute">Minute</label><input id="audit-minute" name="minute" type="text" placeholder="2026-09-18T14:30:00Z"></div>
-      <button type="submit">Filter</button><a id="audit-csv" href="#">Download CSV</a>
-    </form>
-    <p id="audit-count" role="status"></p>
-    <table><thead><tr><th>Minute / stock</th><th>Decision evidence</th><th>Explanation / execution</th></tr></thead><tbody id="audit-rows"></tbody></table>
-  </section>
   <section id="comparison-summary" aria-busy="false"{f' data-run-id="{escape(selected_id)}" data-trading-date="{escape(selected_date)}"' if selected_id else ''}{'' if selected_id else ' hidden'}>
     <h2>Method comparison</h2>
     <table><caption>Method comparison</caption><thead><tr><th>Method</th><th>Net profit</th><th>Return</th><th>Max drawdown</th><th>Trades</th><th>Total costs</th><th>vs buy-and-hold</th></tr></thead><tbody id="comparison-body">{comparison_rows}</tbody></table>
+    <section id="visualization" aria-label="Historical decision visualization" hidden>
+      <h3>Decision overview</h3><p id="visual-status" role="status"></p>
+      <div id="decision-overview"></div>
+      <h3>Symbol analysis</h3><div id="symbol-buttons" aria-label="Select symbol"></div>
+      <p>▲ BUY · ▼ SELL · ◆ ABSTAIN/error · ● fill · □ forced close. Times in UTC.</p>
+      <p>Hover to inspect. Focus a chart and use arrow keys to move by minute; Enter pins, Escape unpins.</p>
+      <button id="unpin-minute" type="button">Unpin minute</button>
+      <div id="decision-charts"></div>
+      <pre id="minute-detail" role="status" aria-live="polite"></pre>
+    </section>
     <h3>Equity curve</h3>
+    <p>JEV: blue · SMA20/SMA60: orange · Buy-and-hold: green</p>
     <p id="equity-summary"></p>
     <svg id="equity-chart" viewBox="0 0 600 200" aria-hidden="true"></svg>
     <details id="equity-data"><summary>Show exact equity data</summary><table><caption>Equity by method and time</caption><thead><tr><th>Method</th><th>Time</th><th>Equity</th></tr></thead><tbody></tbody></table></details>
@@ -286,7 +309,20 @@ svg{{width:100%;height:12rem;border:1px solid #ccc}}
     <table><caption>JEV fees</caption><thead><tr><th>Fee</th><th>Amount</th></tr></thead><tbody id="fees-body"></tbody></table>
     <table><caption>JEV ending positions</caption><thead><tr><th>Stock</th><th>Quantity</th><th>Realized P&amp;L</th></tr></thead><tbody id="positions-body"></tbody></table>
   </section>
+  <section id="audit" aria-busy="false" hidden>
+    <details><summary>Show raw decision log</summary>
+    <form id="audit-filters">
+      <div><label for="audit-symbol">Stock</label><select id="audit-symbol" name="symbol"><option value="">All</option><option>AAPL</option><option>MSFT</option><option>NVDA</option></select></div>
+      <div><label for="audit-action">Action</label><select id="audit-action" name="action"><option value="">All</option><option>BUY</option><option>HOLD</option><option>SELL</option><option>ABSTAIN</option></select></div>
+      <div><label for="audit-minute">Minute</label><input id="audit-minute" name="minute" type="text" placeholder="2026-09-18T14:30:00Z"></div>
+      <button type="submit">Filter</button><a id="audit-csv" href="#">Download CSV</a>
+    </form>
+    <p id="audit-count" role="status"></p>
+    <table><thead><tr><th>Minute / stock</th><th>Decision evidence</th><th>Explanation / execution</th></tr></thead><tbody id="audit-rows"></tbody></table>
+    </details>
+  </section>
 </main>
+<script src="/dashboard.js"></script>
 <script>
 const form=document.querySelector("#run-form"),status=document.querySelector("#run-status"),runsStatus=document.querySelector("#runs-status"),resultStatus=document.querySelector("#result-status"),list=document.querySelector("#completed-runs"),button=form.querySelector("button"),audit=document.querySelector("#audit"),filters=document.querySelector("#audit-filters"),rows=document.querySelector("#audit-rows"),count=document.querySelector("#audit-count"),csv=document.querySelector("#audit-csv"),summary=document.querySelector("#comparison-summary");let selectedRun,hasResult=false,lastProgress="No progress received yet.";
 const money=new Intl.NumberFormat(undefined,{{style:"currency",currency:"USD"}}),percent=new Intl.NumberFormat(undefined,{{style:"percent",maximumFractionDigits:2}});
@@ -296,7 +332,7 @@ function cell(row,value){{const item=document.createElement("td");item.textConte
 function auditUrl(id,extension=""){{const query=new URLSearchParams(new FormData(filters));for(const [key,value] of [...query])if(!value)query.delete(key);return `/api/runs/${{id}}/audit${{extension}}?${{query}}`}}
 async function loadAudit(id=selectedRun){{audit.setAttribute("aria-busy","true");count.textContent="Loading decisions…";try{{const data=await request(auditUrl(id));if(id!==selectedRun)return;rows.replaceChildren(...data.decisions.map(decision=>{{const row=document.createElement("tr");for(const value of [`${{decision.minute}}\n${{decision.symbol}}`,JSON.stringify({{action:decision.action,probabilities:decision.probabilities,input:decision.input,error:decision.error}},null,2),JSON.stringify({{explanation:decision.explanation,orders:decision.orders,fills:decision.fills}},null,2)]){{const cell=document.createElement("td"),pre=document.createElement("pre");pre.textContent=value;cell.append(pre);row.append(cell)}}return row}}));count.textContent=`${{data.decisions.length}} decision${{data.decisions.length===1?"":"s"}}.`;csv.href=auditUrl(id,".csv")}}catch(error){{if(id===selectedRun)count.textContent=`Could not refresh decisions: ${{error.message}} Showing the last loaded data.`}}finally{{if(id===selectedRun)audit.setAttribute("aria-busy","false")}}}}
 async function showComparison(id){{summary.setAttribute("aria-busy","true");resultStatus.textContent="Loading selected run…";try{{const [data,run]=await Promise.all([request(`/api/runs/${{id}}/comparison`),request(`/api/runs/${{id}}`)]);if(id!==selectedRun)return;const body=document.querySelector("#comparison-body"),contributions=document.querySelector("#contribution-body"),equities=document.querySelector("#equity-data tbody"),svg=document.querySelector("#equity-chart"),fills=document.querySelector("#fills-body"),fees=document.querySelector("#fees-body"),positions=document.querySelector("#positions-body");body.replaceChildren();contributions.replaceChildren();equities.replaceChildren();svg.replaceChildren();fills.replaceChildren();fees.replaceChildren();positions.replaceChildren();const colors=["#165dff","#b45309","#047857"],all=data.methods.flatMap(method=>method.equity_curve.map(point=>Number(point.equity))),low=Math.min(...all),high=Math.max(...all),span=high-low||1;data.methods.forEach((method,index)=>{{const row=document.createElement("tr");cell(row,method.method);cell(row,money.format(method.net_profit));cell(row,percent.format(method.return));cell(row,percent.format(method.maximum_drawdown_return));cell(row,method.trade_count);cell(row,money.format(method.total_costs));cell(row,money.format(method.difference_from_buy_and_hold.net_profit));body.append(row);Object.entries(method.per_stock_contribution).forEach(([symbol,value])=>{{const contribution=document.createElement("tr");cell(contribution,method.method);cell(contribution,symbol);cell(contribution,money.format(value));contributions.append(contribution)}});method.equity_curve.forEach(point=>{{const exact=document.createElement("tr");cell(exact,method.method);cell(exact,point.timestamp);cell(exact,money.format(point.equity));equities.append(exact)}});const line=document.createElementNS("http://www.w3.org/2000/svg","polyline"),last=Math.max(method.equity_curve.length-1,1);line.setAttribute("points",method.equity_curve.map((point,i)=>`${{i/last*600}},${{190-(Number(point.equity)-low)/span*180}}`).join(" "));line.setAttribute("fill","none");line.setAttribute("stroke",colors[index]);line.setAttribute("stroke-width","3");svg.append(line)}});for(const fill of run.result.fills){{const row=document.createElement("tr");for(const value of [fill.timestamp,fill.symbol,fill.side,fill.quantity,money.format(fill.price),money.format(fill.execution_cost)])cell(row,value);fills.append(row)}}for(const fee of run.result.fees){{const row=document.createElement("tr");cell(row,fee.kind);cell(row,money.format(fee.amount));fees.append(row)}}for(const position of run.result.positions){{const row=document.createElement("tr");cell(row,position.symbol);cell(row,position.quantity);cell(row,money.format(position.realized_pnl));positions.append(row)}}document.querySelector("#equity-summary").textContent=`Equity ranges from ${{money.format(low)}} to ${{money.format(high)}}. Exact values follow.`;summary.hidden=false;hasResult=true;resultStatus.textContent=`Showing completed run for ${{run.request.trading_date}}.`}}catch(error){{if(id===selectedRun)resultStatus.textContent=`Could not load selected run: ${{error.message}}${{hasResult?" Showing the last loaded data.":""}}`}}finally{{if(id===selectedRun)summary.setAttribute("aria-busy","false")}}}}
-function selectRun(id){{selectedRun=id;audit.hidden=false;loadAudit(id);showComparison(id)}}
+function selectRun(id){{selectedRun=id;audit.hidden=false;loadAudit(id);showComparison(id);loadVisualization(id)}}
 filters.addEventListener("submit",event=>{{event.preventDefault();loadAudit()}});
 async function completedRuns(){{runsStatus.textContent="Refreshing run history…";try{{const runs=(await request("/api/runs")).filter(run=>run.request.method==="jev");list.replaceChildren(...(runs.length?runs.map(run=>{{const item=document.createElement("li"),date=run.status==="completed"?document.createElement("a"):document.createTextNode(run.request.trading_date);if(run.status==="completed"){{date.href=`/?run=${{run.id}}`;date.textContent=run.request.trading_date;date.addEventListener("click",event=>{{event.preventDefault();history.pushState(null,"",date.href);selectRun(run.id)}})}}item.append(date,` — ${{run.status}}. Created ${{new Date(run.created_at).toLocaleString()}}. Updated ${{new Date(run.updated_at).toLocaleString()}}.${{run.status==="running"?` Progress: ${{run.progress.current}} of ${{run.progress.total}}.`:""}}${{run.status==="failed"?` Failure: ${{run.error||"unknown error"}}.`:""}}`);return item}}):[Object.assign(document.createElement("li"),{{textContent:"There are no parent JEV runs in this database. Verification evidence used a separate temporary database and was not imported."}})]));runsStatus.textContent=""}}catch(error){{runsStatus.textContent=`Could not refresh run history: ${{error.message}} Showing the last loaded data.`}}}}
 async function poll(id,reused=false){{try{{const run=await request(`/api/runs/${{id}}`);run.reused=reused;show(run);if(run.status==="running")setTimeout(()=>poll(id,reused),1000);else{{button.disabled=false;completedRuns();if(run.reused&&run.status==="completed"){{history.pushState(null,"",`/?run=${{run.id}}`);selectRun(run.id)}}}}}}catch(error){{status.textContent=`${{lastProgress}} Could not refresh progress: ${{error.message}} Last known progress is retained; retrying.`;setTimeout(()=>poll(id,reused),1000)}}}}
