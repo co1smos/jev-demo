@@ -19,6 +19,22 @@
     const sell=document.querySelector('#decision-overview [aria-label="AAPL SELL 2026-09-18T14:35:00Z"]');
     assert(sell,'known SELL');sell.focus();sell.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
     assert(detail.textContent.includes('14:35:00Z') && detail.textContent.includes('pinned'),'keyboard pin');
+    for(const region of ['decision-overview','decision-charts']) for(const marker of document.querySelectorAll(`#${region} [role=button]`)) {
+      marker.focus();
+      marker.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+      assert(detail.textContent.includes('pinned'),'focused marker pins');
+      const pinnedDetail=detail.textContent;
+      const hoverChart=document.querySelector('#decision-charts svg');
+      const rect=hoverChart.getBoundingClientRect();
+      const hover=()=>hoverChart.dispatchEvent(new PointerEvent('pointermove',{clientX:rect.left+rect.width,bubbles:true}));
+      hover();
+      assert(detail.textContent===pinnedDetail,'pin prevents hover changes');
+      marker.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      assert(!detail.textContent.includes('pinned'),'Escape releases focused marker: '+marker.getAttribute('aria-label'));
+      hover();
+      assert(detail.textContent.startsWith('2026-09-18T19:59:00Z'),'hover resumes after Escape');
+    }
+    sell.focus();sell.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
     document.querySelectorAll('#symbol-buttons button')[1].click();
     assert(document.querySelector('#decision-charts [aria-label*=forced_close]'),'forced close marker');
     assert(document.querySelector('#decision-overview [aria-label*=ABSTAIN]'),'abstain marker');

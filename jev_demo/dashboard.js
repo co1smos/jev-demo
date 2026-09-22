@@ -55,7 +55,13 @@ function renderVisualization(data) {
     node.append(svgNode('title',{},label));
     node.addEventListener('click',event=>{event.stopPropagation();select(true)});
     node.addEventListener('focus',()=>select(false));
-    node.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();event.stopPropagation();select(true)}});
+    node.addEventListener('keydown',event=>{
+      if(['Enter',' ','Escape'].includes(event.key)) {
+        event.preventDefault();event.stopPropagation();
+        if(event.key==='Escape') {pinned=false;inspect(times[minuteIndex]);}
+        else select(true);
+      }
+    });
     svg.append(node);
   }
   function inspect(time, pin=false) {
