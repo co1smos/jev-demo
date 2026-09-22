@@ -20,14 +20,17 @@ Fill in these values in `.env`:
 - `ALPACA_API_KEY` and `ALPACA_API_SECRET` fetch historical SIP minute bars.
 
 Do not commit or paste these credentials into logs or chat. `.env` is ignored by
-Git. Load it into the process and start the server:
+Git. Start the server:
 
 ```sh
-set -a
-. ./.env
-set +a
-npm start
+./start.sh
 ```
+
+The script loads `.env`, checks the required credentials, installs Node
+dependencies if they are absent, starts the simulator, and keeps it in the
+foreground. Press Ctrl-C once to stop it; the script terminates and waits for
+the server before exiting. It preserves the database and market-data cache so
+completed runs remain available next time.
 
 Open http://127.0.0.1:8000/. If the server runs on another machine, keep it bound
 to loopback and use an SSH tunnel:

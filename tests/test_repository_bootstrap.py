@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -15,8 +16,10 @@ class RepositoryBootstrapTests(unittest.TestCase):
             root / ".sandcastle" / "main.mts",
             root / ".codex" / "config.toml",
             root / "package.json",
+            root / "start.sh",
         ]
         self.assertEqual([], [str(path) for path in required if not path.is_file()])
+        self.assertTrue(os.access(root / "start.sh", os.X_OK))
 
     def test_package_scripts_are_runnable_contracts(self):
         package = json.loads(Path("package.json").read_text())
