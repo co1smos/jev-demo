@@ -1,28 +1,90 @@
 # JEV Paper-Trading Simulator
 
-A planned educational simulator for testing whether TypeSafe AI JEV-directed stock decisions would have made money on completed historical US trading days.
+An educational simulator for testing whether TypeSafe AI JEV-directed stock decisions would have made money on completed historical US trading days.
 
 The agreed v1 replays one-minute Alpaca data for AAPL, MSFT, and NVDA; persists JEV decisions and simulated fills; and compares JEV with a 20/60 moving-average baseline and buy-and-hold under the same costs and allocation limits.
 
-## Setup and run
+## Quickstart
 
-Use Python 3.10+ and Node.js 24+. Export the variables shown in `.env.example`:
+Use Python 3.10+ and Node.js 24+:
+
+```sh
+npm ci
+cp .env.example .env
+chmod 600 .env
+```
+
+Fill in these values in `.env`:
 
 - `TYPESAFE_API_KEY` calls the pinned JEV model.
 - `ALPACA_API_KEY` and `ALPACA_API_SECRET` fetch historical SIP minute bars.
-- `JEV_DEMO_DATABASE`, `JEV_DEMO_CACHE`, and `JEV_DEMO_PORT` optionally select local runtime paths and the listening port.
 
-The application reads environment variables directly; it does not load `.env`
-files. Start it with:
+Do not commit or paste these credentials into logs or chat. `.env` is ignored by
+Git. Load it into the process and start the server:
 
 ```sh
+set -a
+. ./.env
+set +a
 npm start
 ```
 
-Open http://127.0.0.1:8000/. The page reports missing configuration by name
-without displaying its value. Choose a completed US trading date, wait for the
-background run, then select it to inspect the three methods and download the JEV
-decision CSV.
+Open http://127.0.0.1:8000/. If the server runs on another machine, keep it bound
+to loopback and use an SSH tunnel:
+
+```sh
+ssh -L 8000:127.0.0.1:8000 ubuntu@YOUR_SERVER
+```
+
+Then open http://127.0.0.1:8000/ on your own computer. Stop the server with
+Ctrl-C.
+
+## Run a simulation
+
+1. Open the dashboard and confirm Alpaca and TypeSafe are reported as configured.
+2. Choose a completed US trading date. The default is the latest completed
+   exchange session.
+3. Select **Run simulation**. Processing happens in the background; leave the
+   server running while progress updates.
+4. When it finishes, select the completed run from the list.
+
+Each simulation uses one shared $100,000 paper portfolio for AAPL, MSFT, and
+NVDA. It observes the first 60 completed minutes, then compares these methods
+under the same data and cost assumptions:
+
+- pinned JEV `jev-1.13.0` decisions;
+- SMA20/SMA60 crossover;
+- buy-and-hold.
+
+Starting another simulation creates a distinct immutable run. Repeating a date
+reuses its validated market-data cache rather than changing an earlier result.
+
+## Read the dashboard
+
+Selecting a completed run shows:
+
+- net profit, return, maximum drawdown, trade count, and total costs for all
+  three methods;
+- differences from buy-and-hold and per-stock contribution;
+- equity curves plus exact tabular equity values;
+- JEV fills, fees, final positions, and realized P&L;
+- a minute-by-minute JEV audit trail with input features, probabilities,
+  requested/returned model versions, decisions, explanations, orders, and fills.
+
+Filter the audit trail by stock, action, or minute. Select **Download CSV** to
+export the currently selected run's audit records.
+
+## Runtime files and options
+
+By default the server writes `jev-demo.db` and `.jev-demo-cache/` in the project
+directory. Both are ignored by Git. Optional environment variables are:
+
+- `JEV_DEMO_DATABASE` — SQLite database path;
+- `JEV_DEMO_CACHE` — immutable market-snapshot cache directory;
+- `JEV_DEMO_PORT` — loopback HTTP port, default `8000`.
+
+Completed runs survive a restart. A run interrupted by a server restart is
+marked failed rather than silently resumed; start a new run for that date.
 
 ## Reproduce the recorded historical check
 
