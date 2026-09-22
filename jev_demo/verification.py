@@ -9,8 +9,10 @@ import os
 import tempfile
 import threading
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 from urllib.request import urlopen
 
 from .__main__ import RunApplication, execute_run, handler_for
@@ -24,8 +26,41 @@ def _get(base_url, path):
         return response.read()
 
 
+class _RenderedComparison(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.dashboard = {}
+        self.methods = []
+        self._body = False
+        self._first_cell = False
+        self._method = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "section" and attrs.get("id") == "comparison-summary":
+            self.dashboard = {
+                "run_id": attrs.get("data-run-id"),
+                "trading_date": attrs.get("data-trading-date"),
+            }
+        if tag == "tbody" and attrs.get("id") == "comparison-body":
+            self._body = True
+        elif tag == "tr" and self._body:
+            self._first_cell = True
+        elif tag == "td" and self._first_cell:
+            self._method = True
+            self._first_cell = False
+
+    def handle_endtag(self, tag):
+        if tag == "tbody" and self._body:
+            self._body = False
+
+    def handle_data(self, data):
+        if self._method:
+            self.methods.append(data)
+            self._method = False
+
+
 def verification_evidence(base_url, first_run_id, second_run_id):
-    page = _get(base_url, "/").decode()
     runs = [json.loads(_get(base_url, f"/api/runs/{run_id}"))
             for run_id in (first_run_id, second_run_id)]
     snapshots = [
@@ -40,6 +75,14 @@ def verification_evidence(base_url, first_run_id, second_run_id):
     comparisons = [json.loads(_get(base_url, f"/api/runs/{run['id']}/comparison"))
                    for run in runs]
     audits = [json.loads(_get(base_url, f"/api/runs/{run['id']}/audit")) for run in runs]
+    dashboard_body = _get(base_url, f"/?run={quote(second_run_id)}")
+    rendered = _RenderedComparison()
+    rendered.feed(dashboard_body.decode())
+    dashboard = {
+        **rendered.dashboard,
+        "methods": rendered.methods,
+        "sha256": hashlib.sha256(dashboard_body).hexdigest(),
+    }
     csv_exports = []
     for run in runs:
         body = _get(base_url, f"/api/runs/{run['id']}/audit.csv")
@@ -57,6 +100,7 @@ def verification_evidence(base_url, first_run_id, second_run_id):
         "fee_version": runs[0]["result"]["fee_version"],
         "execution_version": runs[0]["result"]["execution_model_version"],
         "captured_at": datetime.now(timezone.utc).isoformat(),
+        "dashboard": dashboard,
         "csv_exports": csv_exports,
         "runs": [{
             "run_id": run["id"],
@@ -78,10 +122,10 @@ def verification_evidence(base_url, first_run_id, second_run_id):
                 == ["jev", "sma20_sma60", "buy_and_hold"]
                 for result in comparisons
             ),
-            "dashboard_rendered": all(run["status"] == "completed" for run in runs)
-            and all(result["run_id"] == run["id"] for run, result in zip(runs, comparisons))
-            and all(audit["run_id"] == run["id"] for run, audit in zip(runs, audits))
-            and 'id="comparison-summary"' in page and 'id="audit"' in page,
+            "dashboard_rendered": dashboard["run_id"] == second_run_id
+            and dashboard["trading_date"] == runs[1]["request"]["trading_date"]
+            and dashboard["methods"] == [method["method"] for method in comparisons[1]["methods"]]
+            and audits[1]["run_id"] == second_run_id,
             "csv_exported": all(export["row_count"] > 0 for export in csv_exports),
         },
     }

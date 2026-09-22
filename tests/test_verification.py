@@ -91,6 +91,12 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(run_ids, [run["run_id"] for run in evidence["runs"]])
         self.assertEqual([False, True], [run["source_reused"] for run in evidence["runs"]])
         self.assertEqual("9", evidence["runs"][0]["final_metrics"][0]["net_profit"])
+        self.assertEqual(run_ids[1], evidence["dashboard"]["run_id"])
+        self.assertEqual("2026-09-18", evidence["dashboard"]["trading_date"])
+        self.assertEqual(
+            ["jev", "sma20_sma60", "buy_and_hold"], evidence["dashboard"]["methods"]
+        )
+        self.assertEqual(64, len(evidence["dashboard"]["sha256"]))
         self.assertTrue(all(evidence["checks"].values()))
         self.assertTrue(all(export["row_count"] == 2 for export in evidence["csv_exports"]))
         self.assertTrue(all(len(export["sha256"]) == 64 for export in evidence["csv_exports"]))
