@@ -2,31 +2,16 @@
 
 ### Model routing
 
-Use the cheapest model appropriate for the task. The default Codex session uses
-`gpt-5.6-luna` with medium reasoning.
+Use `gpt-5.6-luna` with high reasoning for every implementation task, including
+features, bug fixes, refactoring, tests, code review, and Sandcastle/Codex rounds.
 
-Handle simple implementation tasks directly in the current Luna agent. Simple
-tasks are mechanical edits, renames, formatting, boilerplate, straightforward
-tests, obvious small fixes, and changes whose implementation is already explicit.
+Use `gpt-5.6-sol` with high reasoning for design tasks.
 
-Use the `sol_worker` tier (`gpt-5.6-sol`, medium) for normal engineering work:
-features with clear requirements, normal bug fixes, related multi-file changes,
-business logic, normal code review, and refactoring that requires understanding
-existing code.
-
-Use the `astra_worker` tier (`gpt-6-astra`, low) for hard work: unclear root
-causes, difficult debugging, unfamiliar architecture, concurrency or distributed
-systems, large cross-component changes, ambiguous requirements, subtle
-correctness problems, or a failed Sol attempt.
-
-Do not escalate merely to improve confidence, and do not spawn agents only to
-classify a task. Escalate Luna to Sol when substantial reasoning beyond
-mechanical execution is required. Escalate Sol to Astra only when the problem
-remains unresolved, important assumptions cannot be established, verification
-fails, or the task clearly belongs in the hard category.
+Do not use `gpt-6-astra` for any task until this rule is explicitly changed by
+the user. This prohibition applies even to hard, ambiguous, or failed tasks.
 
 Before launching a delegated worker, preflight its exact model and reasoning
-effort. If that tier is unavailable, preflight the configured
+effort. If the selected model is unavailable, preflight the configured
 `gemini-pro-agent` model ID and use it with high reasoning. If
 `gemini-pro-agent` is unavailable or not configured, use the authenticated
 Codex account's verified default and report the fallback.
