@@ -78,12 +78,6 @@ class RunStore:
         timestamp = _now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            if reuse_key:
-                existing = connection.execute(
-                    "SELECT id FROM runs WHERE reuse_key = ?", (reuse_key,)
-                ).fetchone()
-                if existing:
-                    return existing["id"], False
             existing = connection.execute(
                 "SELECT id, request FROM runs WHERE idempotency_key = ?", (idempotency_key,)
             ).fetchone() if idempotency_key else None
@@ -91,6 +85,12 @@ class RunStore:
                 if json.loads(existing["request"]) != request:
                     raise ValueError("idempotency key was already used for another request")
                 return existing["id"], False
+            if reuse_key:
+                existing = connection.execute(
+                    "SELECT id FROM runs WHERE reuse_key = ?", (reuse_key,)
+                ).fetchone()
+                if existing:
+                    return existing["id"], False
             connection.execute(
                 "INSERT INTO runs (id, idempotency_key, reuse_key, request, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, 'running', ?, ?)",

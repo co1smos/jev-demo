@@ -81,6 +81,15 @@ class RunStoreTests(unittest.TestCase):
         self.assertEqual(1, len({run_id for run_id, _ in results}))
         self.assertEqual([False, True], sorted(created for _, created in results))
 
+    def test_idempotency_mismatch_wins_over_equivalent_run_reuse(self):
+        first_request = {"trading_date": "2026-09-18", "method": "jev"}
+        second_request = {"trading_date": "2026-09-19", "method": "jev"}
+        self.store.create_once(first_request, "same-request", "first-simulation")
+        self.store.create_once(second_request, "other-request", "second-simulation")
+
+        with self.assertRaisesRegex(ValueError, "another request"):
+            self.store.create_once(second_request, "same-request", "second-simulation")
+
 
 if __name__ == "__main__":
     unittest.main()
