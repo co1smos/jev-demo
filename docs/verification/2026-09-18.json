@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-09-22T00:11:00.516003+00:00",
+  "captured_at": "2026-09-22T00:40:35.208151+00:00",
   "checks": {
     "csv_exported": true,
     "dashboard_rendered": true,
@@ -10,6 +10,18 @@
     "source_digest_matches": true,
     "three_methods_persisted": true
   },
+  "csv_exports": [
+    {
+      "row_count": 987,
+      "run_id": "5b68482d-40c3-4320-9fba-a3fa1faf54be",
+      "sha256": "98e3450c42db44d488a540f1f629a933373c36406d45609e16e972741b13cc1d"
+    },
+    {
+      "row_count": 987,
+      "run_id": "030f5a1b-57a1-413e-bcd5-09885e57ac1e",
+      "sha256": "08160ee8108814f30c414ddd3a9465af0ad442242fec6938c4187ac6c1af8454"
+    }
+  ],
   "date": "2026-09-18",
   "execution_version": "next_minute_open_2bps_v1",
   "fee_version": "us_equity_2026_v1",
@@ -73,7 +85,7 @@
           "trade_count": 6
         }
       ],
-      "run_id": "23ae0ffb-0898-4a1f-8bf7-32c299cecb10",
+      "run_id": "5b68482d-40c3-4320-9fba-a3fa1faf54be",
       "source_reused": false
     },
     {
@@ -133,7 +145,7 @@
           "trade_count": 6
         }
       ],
-      "run_id": "487e6aa3-2899-44c4-b272-c7224163446e",
+      "run_id": "030f5a1b-57a1-413e-bcd5-09885e57ac1e",
       "source_reused": true
     }
   ],

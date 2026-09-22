@@ -34,7 +34,8 @@ def verification_evidence(base_url, first_run_id, second_run_id):
     ]
     decisions = [decision for run in runs for decision in run["result"]["decisions"]]
     requested = {decision["requested_model"] for decision in decisions}
-    returned = {decision["returned_model"] for decision in decisions}
+    returned = {decision["returned_model"] for decision in decisions
+                if decision["returned_model"] is not None}
     strategies = {decision["input_version"] for decision in decisions}
     comparisons = [json.loads(_get(base_url, f"/api/runs/{run['id']}/comparison"))
                    for run in runs]

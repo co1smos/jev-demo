@@ -12,6 +12,18 @@ from jev_demo.verification import verification_evidence
 
 
 class VerificationTests(unittest.TestCase):
+    def test_committed_evidence_captures_csv_exports(self):
+        evidence = json.loads(
+            (Path(__file__).parents[1] / "docs/verification/2026-09-18.json").read_text()
+        )
+
+        self.assertEqual(
+            [run["run_id"] for run in evidence["runs"]],
+            [export["run_id"] for export in evidence["csv_exports"]],
+        )
+        self.assertTrue(all(export["row_count"] > 0 for export in evidence["csv_exports"]))
+        self.assertTrue(all(len(export["sha256"]) == 64 for export in evidence["csv_exports"]))
+
     def test_evidence_loads_completed_runs_and_csv_through_http(self):
         with tempfile.TemporaryDirectory() as directory:
             store = RunStore(Path(directory) / "runs.db")
@@ -34,6 +46,11 @@ class VerificationTests(unittest.TestCase):
                         "action": "HOLD", "probabilities": {"HOLD": 1}, "input": {},
                         "requested_model": "jev-1.13.0", "returned_model": "jev-1.13.0",
                         "input_version": "trend_momentum_v1",
+                    }, {
+                        "symbol": "MSFT", "minute": "2026-09-18T14:30:00Z",
+                        "action": "ABSTAIN", "probabilities": {"ABSTAIN": 1}, "input": {},
+                        "requested_model": "jev-1.13.0", "returned_model": None,
+                        "input_version": "trend_momentum_v1", "error": "invalid_response",
                     }],
                     "actions": [], "orders": [],
                 }
@@ -75,7 +92,7 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual([False, True], [run["source_reused"] for run in evidence["runs"]])
         self.assertEqual("9", evidence["runs"][0]["final_metrics"][0]["net_profit"])
         self.assertTrue(all(evidence["checks"].values()))
-        self.assertTrue(all(export["row_count"] == 1 for export in evidence["csv_exports"]))
+        self.assertTrue(all(export["row_count"] == 2 for export in evidence["csv_exports"]))
         self.assertTrue(all(len(export["sha256"]) == 64 for export in evidence["csv_exports"]))
 
 
