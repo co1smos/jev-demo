@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -60,6 +61,25 @@ class RunStoreTests(unittest.TestCase):
         self.assertEqual([], reopened.read(run_id)["records"])
         reopened.fail(run_id, "provider unavailable")
         self.assertEqual("failed", reopened.read(run_id)["status"])
+
+    def test_equivalent_running_run_is_created_once_under_concurrency(self):
+        request = {"trading_date": "2026-09-18", "method": "jev"}
+        barrier = threading.Barrier(3)
+        results = []
+
+        def create():
+            barrier.wait()
+            results.append(self.store.create_once(request, None, "same-simulation"))
+
+        threads = [threading.Thread(target=create) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(1, len({run_id for run_id, _ in results}))
+        self.assertEqual([False, True], sorted(created for _, created in results))
 
 
 if __name__ == "__main__":

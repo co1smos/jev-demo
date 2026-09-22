@@ -9,11 +9,29 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .audit import audit_csv, read_audit
-from .decision import TypeSafeDecisionProvider
-from .historical_data import AlpacaHistoricalData
+from .decision import MODEL, QUESTION_VERSION, TypeSafeDecisionProvider
+from .historical_data import SYMBOLS, AlpacaHistoricalData
 from .read_model import comparison
 from .run_store import RunStore
-from .simulation import SimulationRequest, run_simulation
+from .simulation import (
+    EXECUTION_MODEL_VERSION,
+    FEE_MODEL_VERSION,
+    SimulationRequest,
+    run_simulation,
+)
+from .strategy import TrendMomentumV1
+
+
+def simulation_identity(trading_date):
+    return {
+        "trading_date": trading_date,
+        "symbols": list(SYMBOLS),
+        "strategy_version": TrendMomentumV1.version,
+        "requested_model": MODEL,
+        "question_version": QUESTION_VERSION,
+        "execution_model_version": EXECUTION_MODEL_VERSION,
+        "fee_version": FEE_MODEL_VERSION,
+    }
 
 
 def latest_historical_date():
@@ -66,12 +84,16 @@ class RunApplication:
         if not isinstance(request, dict) or set(request) != {"trading_date"}:
             raise ValueError("trading_date is required")
         date.fromisoformat(request["trading_date"])
-        request = {**request, "method": "jev"}
-        run_id, created = self.store.create_once(request, idempotency_key)
+        identity = simulation_identity(request["trading_date"])
+        request = {**identity, "method": "jev"}
+        reuse_key = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+        run_id, created = self.store.create_once(request, idempotency_key, reuse_key)
         if created:
             self.store.progress(run_id, 0, 2)
             self.submit(run_id, request)
-        return self.store.read(run_id), created
+        run = self.store.read(run_id)
+        run["reused"] = not created
+        return run, created
 
     def _submit(self, run_id, request):
         def work():
@@ -269,7 +291,7 @@ svg{{width:100%;height:12rem;border:1px solid #ccc}}
 const form=document.querySelector("#run-form"),status=document.querySelector("#run-status"),runsStatus=document.querySelector("#runs-status"),resultStatus=document.querySelector("#result-status"),list=document.querySelector("#completed-runs"),button=form.querySelector("button"),audit=document.querySelector("#audit"),filters=document.querySelector("#audit-filters"),rows=document.querySelector("#audit-rows"),count=document.querySelector("#audit-count"),csv=document.querySelector("#audit-csv"),summary=document.querySelector("#comparison-summary");let selectedRun,hasResult=false,lastProgress="No progress received yet.";
 const money=new Intl.NumberFormat(undefined,{{style:"currency",currency:"USD"}}),percent=new Intl.NumberFormat(undefined,{{style:"percent",maximumFractionDigits:2}});
 async function request(url,options){{const response=await fetch(url,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}}
-function show(run){{if(run.status==="running"){{const p=run.progress;lastProgress=`Run in progress: ${{p.current}} of ${{p.total}} steps complete.`;status.textContent=lastProgress}}else if(run.status==="failed")status.textContent=`Run failed: ${{run.error}}`;else status.textContent="Run completed."}}
+function show(run){{const reused=run.reused?"Reused existing run. ":"";if(run.status==="running"){{const p=run.progress;lastProgress=`${{reused}}Run in progress: ${{p.current}} of ${{p.total}} steps complete.`;status.textContent=lastProgress}}else if(run.status==="failed")status.textContent=`${{reused}}Run failed: ${{run.error}}`;else status.textContent=`${{reused}}Run completed.`}}
 function cell(row,value){{const item=document.createElement("td");item.textContent=value;row.append(item)}}
 function auditUrl(id,extension=""){{const query=new URLSearchParams(new FormData(filters));for(const [key,value] of [...query])if(!value)query.delete(key);return `/api/runs/${{id}}/audit${{extension}}?${{query}}`}}
 async function loadAudit(id=selectedRun){{audit.setAttribute("aria-busy","true");count.textContent="Loading decisions…";try{{const data=await request(auditUrl(id));if(id!==selectedRun)return;rows.replaceChildren(...data.decisions.map(decision=>{{const row=document.createElement("tr");for(const value of [`${{decision.minute}}\n${{decision.symbol}}`,JSON.stringify({{action:decision.action,probabilities:decision.probabilities,input:decision.input,error:decision.error}},null,2),JSON.stringify({{explanation:decision.explanation,orders:decision.orders,fills:decision.fills}},null,2)]){{const cell=document.createElement("td"),pre=document.createElement("pre");pre.textContent=value;cell.append(pre);row.append(cell)}}return row}}));count.textContent=`${{data.decisions.length}} decision${{data.decisions.length===1?"":"s"}}.`;csv.href=auditUrl(id,".csv")}}catch(error){{if(id===selectedRun)count.textContent=`Could not refresh decisions: ${{error.message}} Showing the last loaded data.`}}finally{{if(id===selectedRun)audit.setAttribute("aria-busy","false")}}}}
@@ -277,8 +299,8 @@ async function showComparison(id){{summary.setAttribute("aria-busy","true");resu
 function selectRun(id){{selectedRun=id;audit.hidden=false;loadAudit(id);showComparison(id)}}
 filters.addEventListener("submit",event=>{{event.preventDefault();loadAudit()}});
 async function completedRuns(){{runsStatus.textContent="Refreshing run history…";try{{const runs=(await request("/api/runs")).filter(run=>run.request.method==="jev");list.replaceChildren(...(runs.length?runs.map(run=>{{const item=document.createElement("li"),date=run.status==="completed"?document.createElement("a"):document.createTextNode(run.request.trading_date);if(run.status==="completed"){{date.href=`/?run=${{run.id}}`;date.textContent=run.request.trading_date;date.addEventListener("click",event=>{{event.preventDefault();history.pushState(null,"",date.href);selectRun(run.id)}})}}item.append(date,` — ${{run.status}}. Created ${{new Date(run.created_at).toLocaleString()}}. Updated ${{new Date(run.updated_at).toLocaleString()}}.${{run.status==="running"?` Progress: ${{run.progress.current}} of ${{run.progress.total}}.`:""}}${{run.status==="failed"?` Failure: ${{run.error||"unknown error"}}.`:""}}`);return item}}):[Object.assign(document.createElement("li"),{{textContent:"There are no parent JEV runs in this database. Verification evidence used a separate temporary database and was not imported."}})]));runsStatus.textContent=""}}catch(error){{runsStatus.textContent=`Could not refresh run history: ${{error.message}} Showing the last loaded data.`}}}}
-async function poll(id){{try{{const run=await request(`/api/runs/${{id}}`);show(run);if(run.status==="running")setTimeout(()=>poll(id),1000);else{{button.disabled=false;completedRuns()}}}}catch(error){{status.textContent=`${{lastProgress}} Could not refresh progress: ${{error.message}} Last known progress is retained; retrying.`;setTimeout(()=>poll(id),1000)}}}}
-form.addEventListener("submit",async event=>{{event.preventDefault();button.disabled=true;status.textContent="Starting run…";try{{const run=await request("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}},body:JSON.stringify({{trading_date:form.trading_date.value}})}});show(run);poll(run.id)}}catch(error){{status.textContent=`Could not start run: ${{error.message}}`;button.disabled=false}}}});
+async function poll(id,reused=false){{try{{const run=await request(`/api/runs/${{id}}`);run.reused=reused;show(run);if(run.status==="running")setTimeout(()=>poll(id,reused),1000);else{{button.disabled=false;completedRuns();if(run.reused&&run.status==="completed"){{history.pushState(null,"",`/?run=${{run.id}}`);selectRun(run.id)}}}}}}catch(error){{status.textContent=`${{lastProgress}} Could not refresh progress: ${{error.message}} Last known progress is retained; retrying.`;setTimeout(()=>poll(id,reused),1000)}}}}
+form.addEventListener("submit",async event=>{{event.preventDefault();button.disabled=true;status.textContent="Starting run…";try{{const run=await request("/api/runs",{{method:"POST",headers:{{"Content-Type":"application/json","Idempotency-Key":crypto.randomUUID()}},body:JSON.stringify({{trading_date:form.trading_date.value}})}});show(run);if(run.reused&&run.status==="completed"){{button.disabled=false;history.pushState(null,"",`/?run=${{run.id}}`);selectRun(run.id);completedRuns()}}else poll(run.id,run.reused)}}catch(error){{status.textContent=`Could not start run: ${{error.message}}`;button.disabled=false}}}});
 if(summary.dataset.runId)selectRun(summary.dataset.runId);
 completedRuns();
 </script>
