@@ -14,6 +14,8 @@ SEC_RATE = Decimal("0.0000206")
 TAF_RATE = Decimal("0.000195")
 TAF_CAP = Decimal("9.79")
 CENT = Decimal("0.01")
+EXECUTION_MODEL_VERSION = "next_minute_open_2bps_v1"
+FEE_MODEL_VERSION = "us_equity_2026_v1"
 
 
 @dataclass(frozen=True)
@@ -290,8 +292,8 @@ def _run(request, snapshot, store, decide, decisions=None, run_id=None, action_r
         "equity_points": equity_points,
         "ledger": ledger,
         "reconciliation_difference": _text((cash - ledger_cash).quantize(CENT)),
-        "execution_model_version": "next_minute_open_2bps_v1",
-        "fee_version": "us_equity_2026_v1",
+        "execution_model_version": EXECUTION_MODEL_VERSION,
+        "fee_version": FEE_MODEL_VERSION,
     }
     if decisions is not None:
         result["decisions"] = decisions

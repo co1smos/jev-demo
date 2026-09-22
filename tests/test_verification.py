@@ -4,7 +4,6 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 from jev_demo.__main__ import RunApplication, handler_for
 from jev_demo.run_store import RunStore
@@ -80,13 +79,9 @@ class VerificationTests(unittest.TestCase):
             try:
                 run_ids = []
                 for _ in range(2):
-                    request = Request(
-                        base_url + "/api/runs", method="POST",
-                        data=json.dumps({"trading_date": "2026-09-18"}).encode(),
-                        headers={"Content-Type": "application/json"},
-                    )
-                    with urlopen(request, timeout=2) as response:
-                        run_ids.append(json.load(response)["id"])
+                    run_id = store.create({"trading_date": "2026-09-18", "method": "jev"})
+                    submit(run_id, store.read(run_id)["request"])
+                    run_ids.append(run_id)
 
                 evidence = verification_evidence(base_url, *run_ids)
             finally:

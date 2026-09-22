@@ -19,6 +19,7 @@ class RunStore:
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY,
                     idempotency_key TEXT,
+                    reuse_key TEXT,
                     request TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
                     progress_current INTEGER NOT NULL DEFAULT 0,
@@ -44,8 +45,13 @@ class RunStore:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
             if "idempotency_key" not in columns:
                 connection.execute("ALTER TABLE runs ADD COLUMN idempotency_key TEXT")
+            if "reuse_key" not in columns:
+                connection.execute("ALTER TABLE runs ADD COLUMN reuse_key TEXT")
             connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS runs_idempotency_key ON runs(idempotency_key)"
+            )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS runs_reuse_key ON runs(reuse_key)"
             )
 
     def _connect(self):
@@ -65,8 +71,8 @@ class RunStore:
             )
         return run_id
 
-    def create_once(self, request, idempotency_key):
-        if not idempotency_key:
+    def create_once(self, request, idempotency_key, reuse_key=None):
+        if not idempotency_key and not reuse_key:
             return self.create(request), True
         run_id = str(uuid.uuid4())
         timestamp = _now()
@@ -74,15 +80,21 @@ class RunStore:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT id, request FROM runs WHERE idempotency_key = ?", (idempotency_key,)
-            ).fetchone()
+            ).fetchone() if idempotency_key else None
             if existing:
                 if json.loads(existing["request"]) != request:
                     raise ValueError("idempotency key was already used for another request")
                 return existing["id"], False
+            if reuse_key:
+                existing = connection.execute(
+                    "SELECT id FROM runs WHERE reuse_key = ?", (reuse_key,)
+                ).fetchone()
+                if existing:
+                    return existing["id"], False
             connection.execute(
-                "INSERT INTO runs (id, idempotency_key, request, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'running', ?, ?)",
-                (run_id, idempotency_key, json.dumps(request), timestamp, timestamp),
+                "INSERT INTO runs (id, idempotency_key, reuse_key, request, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'running', ?, ?)",
+                (run_id, idempotency_key, reuse_key, json.dumps(request), timestamp, timestamp),
             )
         return run_id, True
 
@@ -155,8 +167,9 @@ class RunStore:
             connection.execute("BEGIN IMMEDIATE")
             self._require_running(connection, run_id)
             connection.execute(
-                "UPDATE runs SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ?",
-                (status, encoded_result, error, timestamp, run_id),
+                "UPDATE runs SET status = ?, result = ?, error = ?, updated_at = ?, "
+                "reuse_key = CASE WHEN ? = 'failed' THEN NULL ELSE reuse_key END WHERE id = ?",
+                (status, encoded_result, error, timestamp, status, run_id),
             )
             connection.execute(
                 "INSERT INTO records (run_id, kind, data, timestamp) VALUES (?, ?, ?, ?)",

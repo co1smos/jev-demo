@@ -3,13 +3,14 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from jev_demo.__main__ import RunApplication, handler_for
+from jev_demo.__main__ import RunApplication, handler_for, simulation_identity
 from jev_demo.historical_data import AlpacaHistoricalData
 from jev_demo.run_store import RunStore
 
@@ -64,17 +65,19 @@ class HttpRunTests(unittest.TestCase):
             return response.status, json.loads(response.read())
 
     def test_create_duplicate_progress_list_and_result(self):
-        headers = {"Idempotency-Key": "browser-submit-1"}
         status, created = self.request(
-            "/api/runs", "POST", {"trading_date": "2026-09-18"}, headers
+            "/api/runs", "POST", {"trading_date": "2026-09-18"},
+            {"Idempotency-Key": "browser-submit-1"},
         )
         duplicate_status, duplicate = self.request(
-            "/api/runs", "POST", {"trading_date": "2026-09-18"}, headers
+            "/api/runs", "POST", {"trading_date": "2026-09-18"},
+            {"Idempotency-Key": "browser-submit-2"},
         )
 
         self.assertEqual(202, status)
         self.assertEqual(200, duplicate_status)
         self.assertEqual(created["id"], duplicate["id"])
+        self.assertTrue(duplicate["reused"])
         self.assertEqual(1, len(self.started))
 
         for _ in range(100):
@@ -98,6 +101,63 @@ class HttpRunTests(unittest.TestCase):
                 break
             time.sleep(0.01)
         self.assertEqual({"net_pnl": "12.34"}, completed["result"])
+
+        completed_status, completed_duplicate = self.request(
+            "/api/runs", "POST", {"trading_date": "2026-09-18"},
+            {"Idempotency-Key": "browser-submit-3"},
+        )
+        self.assertEqual(200, completed_status)
+        self.assertEqual(created["id"], completed_duplicate["id"])
+        self.assertTrue(completed_duplicate["reused"])
+        self.assertEqual(1, len(self.started))
+
+    def test_failed_equivalent_run_can_be_retried(self):
+        submitted = []
+        application = RunApplication(self.store, lambda run_id, request: submitted.append(run_id))
+        failed, _ = application.create(
+            {"trading_date": "2026-09-17"}, "failed-attempt"
+        )
+        self.store.fail(failed["id"], "provider unavailable")
+
+        retried, created = application.create(
+            {"trading_date": "2026-09-17"}, "explicit-retry"
+        )
+
+        self.assertTrue(created)
+        self.assertNotEqual(failed["id"], retried["id"])
+        self.assertEqual(2, len(submitted))
+
+    def test_changed_versioned_assumption_creates_a_new_run(self):
+        _, first = self.request(
+            "/api/runs", "POST", {"trading_date": "2026-09-18"},
+            {"Idempotency-Key": "current-fees"},
+        )
+        with patch("jev_demo.__main__.FEE_MODEL_VERSION", "us_equity_2027_v1"):
+            status, changed = self.request(
+                "/api/runs", "POST", {"trading_date": "2026-09-18"},
+                {"Idempotency-Key": "changed-fees"},
+            )
+
+        self.assertEqual(202, status)
+        self.assertNotEqual(first["id"], changed["id"])
+        self.assertEqual(2, len(self.started))
+
+    def test_simulation_identity_covers_ordered_inputs_and_versions(self):
+        identity = simulation_identity("2026-09-18")
+
+        self.assertEqual(
+            {
+                "trading_date": "2026-09-18",
+                "symbols": ["AAPL", "MSFT", "NVDA"],
+                "strategy_version": "trend_momentum_v1",
+                "requested_model": "jev-1.13.0",
+                "question_version": "stock_action_v1",
+                "execution_model_version": "next_minute_open_2bps_v1",
+                "fee_version": "us_equity_2026_v1",
+            },
+            identity,
+        )
+        self.assertNotEqual(identity, simulation_identity("2026-09-17"))
 
     def test_invalid_create_is_rejected(self):
         with self.assertRaises(HTTPError) as caught:
@@ -124,6 +184,8 @@ class HttpRunTests(unittest.TestCase):
         self.assertIn('aria-busy', page)
         self.assertIn('Showing the last loaded data.', page)
         self.assertIn('"/api/runs"', page)
+        self.assertIn("Reused existing run", page)
+        self.assertIn("if(run.reused&&run.status===\"completed\")", page)
         self.assertNotIn('type="password"', page)
         self.assertNotIn("API key", page)
 
@@ -166,7 +228,7 @@ class HttpRunTests(unittest.TestCase):
 
         self.assertIn("if(id!==selectedRun)return", page)
         self.assertIn("Last known progress", page)
-        self.assertIn("setTimeout(()=>poll(id),1000)", page)
+        self.assertIn("setTimeout(()=>poll(id,reused),1000)", page)
 
     def test_completed_run_audit_json_csv_and_page_filters(self):
         minute = "2026-09-18T14:30:00Z"

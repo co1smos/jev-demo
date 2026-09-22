@@ -24,6 +24,7 @@ npm-debug.log*
 *.sqlite3
 runs/
 data/cache/
+.jev-demo-cache/
 
 # Editors and OS
 .vscode/
