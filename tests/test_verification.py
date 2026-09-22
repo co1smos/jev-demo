@@ -12,11 +12,17 @@ from jev_demo.verification import verification_evidence
 
 
 class VerificationTests(unittest.TestCase):
-    def test_committed_evidence_captures_csv_exports(self):
+    def test_committed_evidence_captures_dashboard_and_csv_exports(self):
         evidence = json.loads(
             (Path(__file__).parents[1] / "docs/verification/2026-09-18.json").read_text()
         )
 
+        self.assertEqual(evidence["runs"][1]["run_id"], evidence["dashboard"]["run_id"])
+        self.assertEqual(evidence["date"], evidence["dashboard"]["trading_date"])
+        self.assertEqual(
+            ["jev", "sma20_sma60", "buy_and_hold"], evidence["dashboard"]["methods"]
+        )
+        self.assertEqual(64, len(evidence["dashboard"]["sha256"]))
         self.assertEqual(
             [run["run_id"] for run in evidence["runs"]],
             [export["run_id"] for export in evidence["csv_exports"]],

@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-09-22T00:40:35.208151+00:00",
+  "captured_at": "2026-09-22T00:56:08.480691+00:00",
   "checks": {
     "csv_exported": true,
     "dashboard_rendered": true,
@@ -22,6 +22,16 @@
       "sha256": "08160ee8108814f30c414ddd3a9465af0ad442242fec6938c4187ac6c1af8454"
     }
   ],
+  "dashboard": {
+    "methods": [
+      "jev",
+      "sma20_sma60",
+      "buy_and_hold"
+    ],
+    "run_id": "030f5a1b-57a1-413e-bcd5-09885e57ac1e",
+    "sha256": "6965045f0d5c2670d1133713446f2d1dfbf18e490a34d22e1563bd8f16a96843",
+    "trading_date": "2026-09-18"
+  },
   "date": "2026-09-18",
   "execution_version": "next_minute_open_2bps_v1",
   "fee_version": "us_equity_2026_v1",
