@@ -1,6 +1,9 @@
 """Run and summarize the real historical acceptance check."""
 
 import argparse
+import csv
+import hashlib
+import io
 import json
 import os
 import tempfile
@@ -11,15 +14,20 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from .__main__ import RunApplication, execute_run, handler_for
-from .audit import audit_csv, read_audit
 from .decision import TypeSafeDecisionProvider
 from .historical_data import AlpacaHistoricalData
-from .read_model import comparison
 from .run_store import RunStore
 
 
-def verification_evidence(store, first_run_id, second_run_id, dashboard_rendered):
-    runs = [store.read(first_run_id), store.read(second_run_id)]
+def _get(base_url, path):
+    with urlopen(base_url + path, timeout=2) as response:
+        return response.read()
+
+
+def verification_evidence(base_url, first_run_id, second_run_id):
+    page = _get(base_url, "/").decode()
+    runs = [json.loads(_get(base_url, f"/api/runs/{run_id}"))
+            for run_id in (first_run_id, second_run_id)]
     snapshots = [
         next(record["data"] for record in run["records"] if record["kind"] == "market_snapshot")
         for run in runs
@@ -28,8 +36,17 @@ def verification_evidence(store, first_run_id, second_run_id, dashboard_rendered
     requested = {decision["requested_model"] for decision in decisions}
     returned = {decision["returned_model"] for decision in decisions}
     strategies = {decision["input_version"] for decision in decisions}
-    comparisons = [comparison(store, run["id"]) for run in runs]
-    csv_exports = [audit_csv(read_audit(store, run["id"])) for run in runs]
+    comparisons = [json.loads(_get(base_url, f"/api/runs/{run['id']}/comparison"))
+                   for run in runs]
+    audits = [json.loads(_get(base_url, f"/api/runs/{run['id']}/audit")) for run in runs]
+    csv_exports = []
+    for run in runs:
+        body = _get(base_url, f"/api/runs/{run['id']}/audit.csv")
+        csv_exports.append({
+            "run_id": run["id"],
+            "row_count": sum(1 for _ in csv.DictReader(io.StringIO(body.decode()))),
+            "sha256": hashlib.sha256(body).hexdigest(),
+        })
     evidence = {
         "date": runs[0]["request"]["trading_date"],
         "source_digest": snapshots[0]["source_digest"],
@@ -39,6 +56,7 @@ def verification_evidence(store, first_run_id, second_run_id, dashboard_rendered
         "fee_version": runs[0]["result"]["fee_version"],
         "execution_version": runs[0]["result"]["execution_model_version"],
         "captured_at": datetime.now(timezone.utc).isoformat(),
+        "csv_exports": csv_exports,
         "runs": [{
             "run_id": run["id"],
             "source_reused": snapshot["reused"],
@@ -59,8 +77,11 @@ def verification_evidence(store, first_run_id, second_run_id, dashboard_rendered
                 == ["jev", "sma20_sma60", "buy_and_hold"]
                 for result in comparisons
             ),
-            "dashboard_rendered": dashboard_rendered,
-            "csv_exported": all(text.startswith("minute,symbol,action") for text in csv_exports),
+            "dashboard_rendered": all(run["status"] == "completed" for run in runs)
+            and all(result["run_id"] == run["id"] for run, result in zip(runs, comparisons))
+            and all(audit["run_id"] == run["id"] for run, audit in zip(runs, audits))
+            and 'id="comparison-summary"' in page and 'id="audit"' in page,
+            "csv_exported": all(export["row_count"] > 0 for export in csv_exports),
         },
     }
     if not all(evidence["checks"].values()):
@@ -68,21 +89,14 @@ def verification_evidence(store, first_run_id, second_run_id, dashboard_rendered
     return evidence
 
 
-def _dashboard_rendered(store, trading_date):
+def _serve(store, trading_date):
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0),
         handler_for(RunApplication(store, lambda *_: None), lambda: trading_date),
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    try:
-        with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=2) as response:
-            page = response.read().decode()
-        return 'id="comparison-summary"' in page and 'id="audit"' in page
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(2)
+    return server, thread
 
 
 def main():
@@ -111,9 +125,15 @@ def main():
             store.progress(run_id, 0, 2)
             execute_run(store, run_id, args.trading_date, data, provider)
             run_ids.append(run_id)
-        evidence = verification_evidence(
-            store, *run_ids, dashboard_rendered=_dashboard_rendered(store, args.trading_date)
-        )
+        server, thread = _serve(store, args.trading_date)
+        try:
+            evidence = verification_evidence(
+                f"http://127.0.0.1:{server.server_port}", *run_ids
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
         output = json.dumps(evidence, indent=2, sort_keys=True) + "\n"
         if args.output:
             Path(args.output).write_text(output)
